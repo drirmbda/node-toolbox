@@ -7,11 +7,12 @@ readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
 ENDPORT=65535                             # Default upper end of port range, inclusive
+WAIT_SECS=5                                     # Default wait between new node starts
 SAFENODEPATH="$HOME/.local/bin/safenode"  # Default safenode binary, full path
 NODE_DIR="$HOME/.local/share/safe/node/"  # Default location of peer_id directories
 NODE_ARCHIVE_DIR="$NODE_DIR/../node_archive/"  # location to archive peer-id directories out of the way
+NODE_DIR_NODEMGR="/var/log/safenode/"     # Default location of peer_id dirs when started with safenode-manager
 NODE_MANAGER=""                           # "y" indicates selection of safenode-manager use-case, not the default
-NODE_DIR_NODEMGR="/var/log/" #@@TODO Correct This! # Default location of peer_id dirs when started with safenode-manager
 INTERACTIVE=""                            # "y" indicates selection of interactive mode with TUI or GUI, not the default
 NO_SCREEN="y"                             # "y" indicates running of new nodes without using screen utility
 COMMAND=""                                # "y" indicates a specific function was selected
@@ -218,6 +219,7 @@ snnm_restart(){
         local __MAXARCHLOGS=0
         #local __RPC_PORT="none"
         snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__PORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS" "--peer_id" "$__PEER_ID"
+        sleep "$WAIT_SECS"
       fi
     fi
   done
@@ -238,6 +240,7 @@ snnm_terminate_and_restart() {
       __PID=$(get_and_store_active_sn_pid "$__PEER_ID")
       if [[ $__PID -gt 0 ]]; then
         snnm_terminate $__PORT $__PORT
+        sleep 2
         snnm_restart $__PORT $__PORT
       else
         echo "Skipping node with peer id $__PEER_ID because it is not running (port $__PORT)."
@@ -271,6 +274,7 @@ snnm_start(){
       local __MAXARCHLOGS=0
       #local __RPC_PORT="none"
       snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__TARGETPORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS"
+      sleep "$WAIT_SECS"
     fi
   done
 }
@@ -325,7 +329,7 @@ cmdline() {
   done
   eval set -- $args                                 # Reset the positional parameters to the short options
 
-  while getopts "d:hma:b:niltsrxyzp:" OPTION                   # Process options
+  while getopts "w:d:hma:b:niltsrxyzp:" OPTION      # Process options
   do
     case $OPTION in
       h) usage ;;
@@ -336,6 +340,7 @@ cmdline() {
       p) STARTPORT=${OPTARG}
          ENDPORT=${OPTARG} ;;
       d) OWNER_DISCORD_ID=${OPTARG} ;;
+      w) WAIT_SECS=${OPTARG} ;;
       n) NO_SCREEN="y" ;;
       i) INTERACTIVE="y" ;;
       l) COMMAND="y"
@@ -363,11 +368,12 @@ usage() {
   echo "Version: $VERSION EXPERIMENTAL!!
         Usage: $0 [arguments]
         -h this help
-        -m enables safenode-manager mode (UNTESTED/REQUIRES CORRECT SETTING OF NODE_DIR_NODEMGR AT TOP OF THE SCRIPT)
+        -m enables safenode-manager mode - UNTESTED!
         -p single port number of nodes to operate on
         -a start port number of nodes to operate on
         -b end port number of nodes to operate on
         -d set discord ID to use, or use none to disable, for all node (re)starts
+        -w wait time in seconds between launch of new nodes
         -n run new nodes without using screen, simply running as disowned process
         -i interactive mode, must precede the command switches it will apply to
         Command switches, executed in order of appearance:
@@ -377,7 +383,7 @@ usage() {
         -x eXchange, that is terminate and restart nodes at same ports
         -s Start nodes in a port range unless a port already is associated with an existing peer-id
         Maintenance command switches moving peer-id directories out of view into a nodearchive directory
-        -y archive all dead nodes (ignores any port restricting arguments)
+        -y archive all dead nodes (ignores any port restricting arguments) - MAY DISRUPT NODE STARTED IN UNSUPPORTED WAYS
         -z archive all nodes without port associated in cache (ignores any port restricting arguments)
         If no command switch is selected, update cached information on all peer ids."
   exit 0
