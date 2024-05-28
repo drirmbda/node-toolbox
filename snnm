@@ -11,7 +11,7 @@ WAIT_SECS=5                                     # Default wait between new node 
 SAFENODEPATH="$HOME/.local/bin/safenode"  # Default safenode binary, full path
 NODE_DIR="$HOME/.local/share/safe/node/"  # Default location of peer_id directories
 NODE_ARCHIVE_DIR="$NODE_DIR/../node_archive/"  # location to archive peer-id directories out of the way
-NODE_DIR_NODEMGR="/var/log/safenode/"     # Default location of peer_id dirs when started with safenode-manager
+#NODE_DIR_NODEMGR="/var/log/safenode/"     # Default location of peer_id dirs when started with safenode-manager
 NODE_MANAGER=""                           # "y" indicates selection of safenode-manager use-case, not the default
 INTERACTIVE=""                            # "y" indicates selection of interactive mode with TUI or GUI, not the default
 NO_SCREEN="y"                             # "y" indicates running of new nodes without using screen utility
@@ -85,7 +85,24 @@ get_sn_port() {
   echo "$__PORT"
 }
 
-#######################################################################################################################
+########################################################################################################################
+# Safenode-manager support
+########################################################################################################################
+
+#usage: Input should be a list such as that returned by $(ls path/)
+snnm_extract_peer_id_list() {
+  local __LIST=("$@")
+  local __FILTERED_LIST=()
+  for __PEER_ID in "${__LIST[@]}"
+  do
+    if [ "${#__PEER_ID}" -eq "52" ] ;then        # peer-ids happen to be 52 characters long.
+      __FILTERED_LIST+=( "$__PEER_ID" )
+    fi
+  done
+  echo "${__FILTERED_LIST[@]}"
+}
+
+########################################################################################################################
 # Starting node functions
 ########################################################################################################################
 
@@ -131,7 +148,6 @@ snnm_node_starter() {
   fi
   sleep 1
   snnm_update_cache
-  #snnm_archive_portless
 }
 
 #######################################################################################################################
@@ -140,7 +156,11 @@ snnm_node_starter() {
 
 snnm_update_cache() {
   echo "Updating cache with current sn status for new peer ids..."
-  for __PEER_ID in $(ls $NODE_DIR)
+  local __FILE_LIST
+  __FILE_LIST=$(ls "$NODE_DIR")
+  local __PEER_ID_LIST
+  __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
+  for __PEER_ID in "${__PEER_ID_LIST[@]}"
   do
     local __PORT_CACHED
     if [ ! -f "$NODE_DIR$__PEER_ID/PORT" ]; then
@@ -162,7 +182,11 @@ snnm_list() {
   local __ENDPORT="$ENDPORT"
   [ -n "$1" ] && __STARTPORT="$1"
   [ -n "$2" ] && __ENDPORT="$2"
-  for __PEER_ID in $(ls $NODE_DIR)
+  local __FILE_LIST
+  __FILE_LIST=$(ls "$NODE_DIR")
+  local __PEER_ID_LIST
+  __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
+  for __PEER_ID in "${__PEER_ID_LIST[@]}"
   do
     local __PORT
     __PORT=$(get_sn_port "$__PEER_ID")
@@ -180,8 +204,11 @@ snnm_terminate(){
   local __ENDPORT="$ENDPORT"
   [ -n "$1" ] && __STARTPORT="$1"
   [ -n "$2" ] && __ENDPORT="$2"
-  #echo "Attempting to stop node(s)..."
-  for __PEER_ID in $(ls $NODE_DIR)
+  local __FILE_LIST
+  __FILE_LIST=$(ls "$NODE_DIR")
+  local __PEER_ID_LIST
+  __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
+  for __PEER_ID in "${__PEER_ID_LIST[@]}"
   do
     local __PORT
     __PORT=$(get_sn_port "$__PEER_ID")
@@ -203,8 +230,11 @@ snnm_restart(){
   local __ENDPORT="$ENDPORT"
   [ -n "$1" ] && __STARTPORT="$1"
   [ -n "$2" ] && __ENDPORT="$2"
-  #echo "Attempting to restart stopped node(s)..."
-  for __PEER_ID in $(ls $NODE_DIR)
+  local __FILE_LIST
+  __FILE_LIST=$(ls "$NODE_DIR")
+  local __PEER_ID_LIST
+  __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
+  for __PEER_ID in "${__PEER_ID_LIST[@]}"
   do
     local __PORT
     __PORT=$(get_sn_port "$__PEER_ID")
@@ -231,7 +261,11 @@ snnm_terminate_and_restart() {
   [ -n "$1" ] && __STARTPORT="$1"
   [ -n "$2" ] && __ENDPORT="$2"
   echo "Attempting to stop and restart node(s), exclusively for nodes that are currently running..."
-  for __PEER_ID in $(ls $NODE_DIR)
+  local __FILE_LIST
+  __FILE_LIST=$(ls "$NODE_DIR")
+  local __PEER_ID_LIST
+  __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
+  for __PEER_ID in "${__PEER_ID_LIST[@]}"
   do
     local __PORT
     __PORT=$(get_sn_port "$__PEER_ID")
@@ -259,7 +293,11 @@ snnm_start(){
   do
     local __TARGET_PORT_FOUND=""
     echo "Exploring start on port number $__TARGETPORT..."
-    for __PEER_ID in $(ls $NODE_DIR)
+    local __FILE_LIST
+    __FILE_LIST=$(ls "$NODE_DIR")
+    local __PEER_ID_LIST
+    __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
+    for __PEER_ID in "${__PEER_ID_LIST[@]}"
     do
       local __PORT
       __PORT=$(get_sn_port "$__PEER_ID")
@@ -281,7 +319,11 @@ snnm_start(){
 
 snnm_archive_portless() {
   echo "Archiving all portless peer-ids..."
-  for __PEER_ID in $(ls $NODE_DIR)
+  local __FILE_LIST
+  __FILE_LIST=$(ls "$NODE_DIR")
+  local __PEER_ID_LIST
+  __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
+  for __PEER_ID in "${__PEER_ID_LIST[@]}"
   do
     #echo -n "Inspecting peer-id $__PEER_ID... "
     local __PORT
@@ -298,7 +340,11 @@ snnm_archive_portless() {
 
 snnm_archive_dead() {
   echo "Archiving all dead peer-ids..."
-  for __PEER_ID in $(ls $NODE_DIR)
+  local __FILE_LIST
+  __FILE_LIST=$(ls "$NODE_DIR")
+  local __PEER_ID_LIST
+  __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
+  for __PEER_ID in "${__PEER_ID_LIST[@]}"
   do
     local __PID
     __PID=$(get_and_store_active_sn_pid "$__PEER_ID")
@@ -334,7 +380,8 @@ cmdline() {
     case $OPTION in
       h) usage ;;
       m) NODE_MANAGER="y"
-         NODE_DIR="$NODE_DIR_NODEMGR" ;;
+         #NODE_DIR="$NODE_DIR_NODEMGR"
+          ;;
       a) STARTPORT=${OPTARG} ;;
       b) ENDPORT=${OPTARG} ;;
       p) STARTPORT=${OPTARG}
@@ -368,7 +415,7 @@ usage() {
   echo "Version: $VERSION EXPERIMENTAL!!
         Usage: $0 [arguments]
         -h this help
-        -m enables safenode-manager mode - UNTESTED!
+        -m enables safenode-manager mode - NOT IMPLEMENTED
         -p single port number of nodes to operate on
         -a start port number of nodes to operate on
         -b end port number of nodes to operate on
