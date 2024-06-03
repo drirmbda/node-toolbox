@@ -2,7 +2,7 @@
 # Kill and restart new node at same port number and with same peer-id
 
 #global variables readonly
-readonly VERSION="0.1"
+readonly VERSION="0.1.1"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -31,13 +31,19 @@ get_and_store_active_sn_pid() {
     __PID=$(cat "$NODE_DIR$__PEER_ID/PID")
     if [[ "$__PID" -gt 0 ]]; then         # check if still alive
       local __PSPID
-      __PSPID=$(ps -A | grep -E -o "^($__PID) ")
+      __PSPID=$(ps -A | grep "safenode" | grep -E -o "($__PID) ")
       if [[ $__PSPID -ne $__PID ]]; then
-         __PID=""
+         #__PID=""
+         echo "WARNING: PID $__PID in cache was not found running! Updating cache but not considering dead yet."
+         rm "$NODE_DIR$__PEER_ID/PID"
       fi
     fi
   else
-    __PID=$(lsof "$NODE_DIR$__PEER_ID/logs/safenode.log" | grep "safenode " | grep -o "[0-9]*" | head -1)
+    if [ -f "$NODE_DIR$__PEER_ID/logs/safenode.log" ]; then
+      __PID=$(lsof "$NODE_DIR$__PEER_ID/logs/safenode.log" | grep "safenode " | grep -o "[0-9]*" | head -1)
+    else
+      echo "WARNING: Logfile $NODE_DIR$__PEER_ID/logs/safenode.log Not Found! Make sure logging is enabled at node start."
+    fi
   fi
   if [[ "$__PID" -gt 0 ]]; then
     echo "$__PID" > "$NODE_DIR$__PEER_ID/PID"
@@ -93,10 +99,12 @@ get_sn_port() {
 snnm_extract_peer_id_list() {
   local __LIST=("$@")
   local __FILTERED_LIST=()
-  for __PEER_ID in "${__LIST[@]}"
+  for __PEER_ID in ${__LIST[@]}
   do
     if [ "${#__PEER_ID}" -eq "52" ] ;then        # peer-ids happen to be 52 characters long.
       __FILTERED_LIST+=( "$__PEER_ID" )
+    else
+      echo "omitting non-peer-id item $__PEER_ID"
     fi
   done
   echo "${__FILTERED_LIST[@]}"
@@ -146,8 +154,8 @@ snnm_node_starter() {
     echo "Starting screen -LdmS safenode$__PORT safenode $ARGSLINE"
     eval "screen -LdmS safenode$__PORT $SAFENODEPATH $ARGSLINE"
   fi
-  sleep 1
-  snnm_update_cache
+  #sleep 1
+  #snnm_update_cache
 }
 
 #######################################################################################################################
@@ -157,19 +165,31 @@ snnm_node_starter() {
 snnm_update_cache() {
   echo "Updating cache with current sn status for new peer ids..."
   local __FILE_LIST
-  __FILE_LIST=$(ls "$NODE_DIR")
+  local __CURRENT_DIR
+  __CURRENT_DIR=$(pwd)
+  __FILE_LIST=()
+  local __FILE_COUNT
+  __FILE_COUNT=$(ls "$NODE_DIR" | wc -l)
+  if [[ "$__FILE_COUNT" -gt 0 ]]; then
+    cd "$NODE_DIR" || exit 1
+    __FILE_LIST=(*)
+    cd "$__CURRENT_DIR" || exit 1
+  fi
   local __PEER_ID_LIST
-  __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
-  for __PEER_ID in "${__PEER_ID_LIST[@]}"
+  __PEER_ID_LIST=$(snnm_extract_peer_id_list "${__FILE_LIST[@]}")
+  echo "Peer-id list to update: ${__FILE_LIST[@]}"
+  for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
-    local __PORT_CACHED
-    if [ ! -f "$NODE_DIR$__PEER_ID/PORT" ]; then
-      get_and_store_sn_port "$__PEER_ID"
-      if [ -f "$NODE_DIR$__PEER_ID/PORT" ]; then
-        __PORT_CACHED=$(cat "$NODE_DIR$__PEER_ID/PORT")
-        echo "New peer: $__PEER_ID port: $__PORT_CACHED"
-      else
-        echo "Failed finding port, node is probably not running. Archive peer-id or restart interactively at an available port."
+    if [ -n "$__PEER_ID" ]; then
+      local __PORT_CACHED
+      if [ ! -f "$NODE_DIR$__PEER_ID/PORT" ]; then
+        get_and_store_sn_port "$__PEER_ID"
+        if [ -f "$NODE_DIR$__PEER_ID/PORT" ]; then
+          __PORT_CACHED=$(cat "$NODE_DIR$__PEER_ID/PORT")
+          echo "New peer: $__PEER_ID port: $__PORT_CACHED"
+        else
+          echo "Failed finding port, node is probably not running. Archive peer-id or restart interactively at an available port."
+        fi
       fi
     fi
   done
@@ -185,16 +205,18 @@ snnm_list() {
   local __FILE_LIST
   __FILE_LIST=$(ls "$NODE_DIR")
   local __PEER_ID_LIST
-  __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
-  for __PEER_ID in "${__PEER_ID_LIST[@]}"
+  __PEER_ID_LIST=$(snnm_extract_peer_id_list "${__FILE_LIST[@]}")
+  for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
-    local __PORT
-    __PORT=$(get_sn_port "$__PEER_ID")
-    if [[ $__PORT -le $__ENDPORT && $__PORT -ge $__STARTPORT ]]; then
-      local __PID
-      __PID=$(get_sn_pid "$__PEER_ID")
-      #echo "| peer-id $__PEER_ID | pid $__PID | port $__PORT |" # screen safenode$__PORT |
-      printf "| port %6s | pid %8s | peer-id %s |\n" "$__PORT" "$__PID" "$__PEER_ID"
+    if [ -n "$__PEER_ID" ]; then
+      local __PORT
+      __PORT=$(get_sn_port "$__PEER_ID")
+      if [[ $__PORT -le $__ENDPORT && $__PORT -ge $__STARTPORT ]]; then
+        local __PID
+        __PID=$(get_sn_pid "$__PEER_ID")
+        #echo "| peer-id $__PEER_ID | pid $__PID | port $__PORT |" # screen safenode$__PORT |
+        printf "| port %6s | pid %8s | peer-id %s |\n" "$__PORT" "$__PID" "$__PEER_ID"
+      fi
     fi
   done
 }
@@ -207,18 +229,20 @@ snnm_terminate(){
   local __FILE_LIST
   __FILE_LIST=$(ls "$NODE_DIR")
   local __PEER_ID_LIST
-  __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
-  for __PEER_ID in "${__PEER_ID_LIST[@]}"
+  __PEER_ID_LIST=$(snnm_extract_peer_id_list "${__FILE_LIST[@]}")
+  for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
-    local __PORT
-    __PORT=$(get_sn_port "$__PEER_ID")
-    if [[ $__PORT -le $__ENDPORT && $__PORT -ge $__STARTPORT ]]; then
-      local __PID
-      __PID=$(get_and_store_active_sn_pid "$__PEER_ID")
-      if [[ $__PID -gt 0 ]]; then
-        kill "$__PID" && echo "Killed node with peer id $__PEER_ID and pid $__PID running at port $__PORT."
-      else
-        echo "$__PEER_ID node already stopped running at port $__PORT."
+    if [ -n "$__PEER_ID" ]; then
+      local __PORT
+      __PORT=$(get_sn_port "$__PEER_ID")
+      if [[ $__PORT -le $__ENDPORT && $__PORT -ge $__STARTPORT ]]; then
+        local __PID
+        __PID=$(get_and_store_active_sn_pid "$__PEER_ID")
+        if [[ $__PID -gt 0 ]]; then
+          kill "$__PID" && echo "Killed node with peer id $__PEER_ID and pid $__PID running at port $__PORT."
+        else
+          echo "$__PEER_ID node already stopped running at port $__PORT."
+        fi
       fi
     fi
   done
@@ -233,23 +257,26 @@ snnm_restart(){
   local __FILE_LIST
   __FILE_LIST=$(ls "$NODE_DIR")
   local __PEER_ID_LIST
-  __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
-  for __PEER_ID in "${__PEER_ID_LIST[@]}"
+  __PEER_ID_LIST=$(snnm_extract_peer_id_list "${__FILE_LIST[@]}")
+  for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
-    local __PORT
-    __PORT=$(get_sn_port "$__PEER_ID")
-    if [[ $__PORT -le $__ENDPORT && $__PORT -ge $__STARTPORT ]]; then
-      local __PID
-      __PID=$(get_and_store_active_sn_pid "$__PEER_ID")
-      if [[ $__PID -gt 0 ]]; then
-        echo "$__PEER_ID node already running, at port $__PORT."
-      else
-        echo "Restarting node with peer id $__PEER_ID running at port $__PORT."
-        local __MAXLOGS=1
-        local __MAXARCHLOGS=0
-        #local __RPC_PORT="none"
-        snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__PORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS" "--peer_id" "$__PEER_ID"
-        sleep "$WAIT_SECS"
+    if [ -n "$__PEER_ID" ]; then
+      local __PORT
+      __PORT=$(get_sn_port "$__PEER_ID")
+      if [[ $__PORT -le $__ENDPORT && $__PORT -ge $__STARTPORT ]]; then
+        local __PID
+        __PID=$(get_and_store_active_sn_pid "$__PEER_ID")
+        if [[ $__PID -gt 0 ]]; then
+          echo "$__PEER_ID node already running, at port $__PORT."
+        else
+          echo "Restarting node with peer id $__PEER_ID running at port $__PORT."
+          local __MAXLOGS=1
+          local __MAXARCHLOGS=0
+          #local __RPC_PORT="none"
+          snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__PORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS" "--peer_id" "$__PEER_ID"
+          sleep "$WAIT_SECS"
+          snnm_update_cache
+        fi
       fi
     fi
   done
@@ -264,20 +291,22 @@ snnm_terminate_and_restart() {
   local __FILE_LIST
   __FILE_LIST=$(ls "$NODE_DIR")
   local __PEER_ID_LIST
-  __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
-  for __PEER_ID in "${__PEER_ID_LIST[@]}"
+  __PEER_ID_LIST=$(snnm_extract_peer_id_list "${__FILE_LIST[@]}")
+  for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
-    local __PORT
-    __PORT=$(get_sn_port "$__PEER_ID")
-    if [[ $__PORT -le $__ENDPORT && $__PORT -ge $__STARTPORT ]]; then
-      local __PID
-      __PID=$(get_and_store_active_sn_pid "$__PEER_ID")
-      if [[ $__PID -gt 0 ]]; then
-        snnm_terminate $__PORT $__PORT
-        sleep 2
-        snnm_restart $__PORT $__PORT
-      else
-        echo "Skipping node with peer id $__PEER_ID because it is not running (port $__PORT)."
+    if [ -n "$__PEER_ID" ]; then
+      local __PORT
+      __PORT=$(get_sn_port "$__PEER_ID")
+      if [[ $__PORT -le $__ENDPORT && $__PORT -ge $__STARTPORT ]]; then
+        local __PID
+        __PID=$(get_and_store_active_sn_pid "$__PEER_ID")
+        if [[ $__PID -gt 0 ]]; then
+          snnm_terminate $__PORT $__PORT
+          sleep 2
+          snnm_restart $__PORT $__PORT
+        else
+          echo "Skipping node with peer id $__PEER_ID because it is not running (port $__PORT)."
+        fi
       fi
     fi
   done
@@ -296,14 +325,16 @@ snnm_start(){
     local __FILE_LIST
     __FILE_LIST=$(ls "$NODE_DIR")
     local __PEER_ID_LIST
-    __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
-    for __PEER_ID in "${__PEER_ID_LIST[@]}"
+    __PEER_ID_LIST=$(snnm_extract_peer_id_list "${__FILE_LIST[@]}")
+    for __PEER_ID in ${__PEER_ID_LIST[@]}
     do
-      local __PORT
-      __PORT=$(get_sn_port "$__PEER_ID")
-      if [[ $__PORT -eq $__TARGETPORT ]]; then
-        echo "$__TARGETPORT already associated with peer-id $__PEER_ID. Use restart instead if it is dead."
-        __TARGET_PORT_FOUND="$__PEER_ID"
+      if [ -n "$__PEER_ID" ]; then
+        local __PORT
+        __PORT=$(get_sn_port "$__PEER_ID")
+        if [[ $__PORT -eq $__TARGETPORT ]]; then
+          echo "$__TARGETPORT already associated with peer-id $__PEER_ID. Use restart instead if it is dead."
+          __TARGET_PORT_FOUND="$__PEER_ID"
+        fi
       fi
     done
     if [ "$__TARGET_PORT_FOUND" == "" ]; then
@@ -313,6 +344,7 @@ snnm_start(){
       #local __RPC_PORT="none"
       snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__TARGETPORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS"
       sleep "$WAIT_SECS"
+      snnm_update_cache
     fi
   done
 }
@@ -322,18 +354,20 @@ snnm_archive_portless() {
   local __FILE_LIST
   __FILE_LIST=$(ls "$NODE_DIR")
   local __PEER_ID_LIST
-  __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
-  for __PEER_ID in "${__PEER_ID_LIST[@]}"
+  __PEER_ID_LIST=$(snnm_extract_peer_id_list "${__FILE_LIST[@]}")
+  for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
-    #echo -n "Inspecting peer-id $__PEER_ID... "
-    local __PORT
-    __PORT=$(get_sn_port "$__PEER_ID")
-    if [[ ! $__PORT -gt 0 ]]; then
-      echo "Peer id $__PEER_ID will be archived: No know associated PORT and no node running to determine it."
-      mkdir -p "$NODE_ARCHIVE_DIR"
-      mv "$NODE_DIR$__PEER_ID" "$NODE_ARCHIVE_DIR$__PEER_ID"
-    #else
-      #echo "Associated port cached: $__PORT"
+    if [ -n "$__PEER_ID" ]; then
+      echo "Inspecting peer-id $__PEER_ID... "
+      local __PORT
+      __PORT=$(get_sn_port "$__PEER_ID")
+      if [[ ! $__PORT -gt 0 ]]; then
+        echo "Peer id $__PEER_ID will be archived: No know associated PORT and no node running to determine it."
+        mkdir -p "$NODE_ARCHIVE_DIR"
+        mv "$NODE_DIR$__PEER_ID" "$NODE_ARCHIVE_DIR$__PEER_ID"
+      #else
+        #echo "Associated port cached: $__PORT"
+      fi
     fi
   done
 }
@@ -343,17 +377,19 @@ snnm_archive_dead() {
   local __FILE_LIST
   __FILE_LIST=$(ls "$NODE_DIR")
   local __PEER_ID_LIST
-  __PEER_ID_LIST=$(snnm_extract_peer_id_list ${__FILE_LIST[@]})
-  for __PEER_ID in "${__PEER_ID_LIST[@]}"
+  __PEER_ID_LIST=$(snnm_extract_peer_id_list "${__FILE_LIST[@]}")
+  for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
-    local __PID
-    __PID=$(get_and_store_active_sn_pid "$__PEER_ID")
-    if [[ $__PID -gt 0 ]]; then
-      echo "$__PEER_ID node alive."
-    else
-      echo "Peer id $__PEER_ID not running and will be archived."
-      mkdir -p "$NODE_ARCHIVE_DIR"
-      mv "$NODE_DIR$__PEER_ID" "$NODE_ARCHIVE_DIR$__PEER_ID"
+    if [ -n "$__PEER_ID" ]; then
+      local __PID
+      __PID=$(get_and_store_active_sn_pid "$__PEER_ID")
+      if [[ $__PID -gt 0 ]]; then
+        echo "$__PEER_ID node alive."
+      else
+        echo "Peer id $__PEER_ID not running (pid=$__PID) and will be archived."
+        mkdir -p "$NODE_ARCHIVE_DIR"
+        mv "$NODE_DIR$__PEER_ID" "$NODE_ARCHIVE_DIR$__PEER_ID"
+      fi
     fi
   done
 }
@@ -375,7 +411,7 @@ cmdline() {
   done
   eval set -- $args                                 # Reset the positional parameters to the short options
 
-  while getopts "w:d:hma:b:niltsrxyzp:" OPTION      # Process options
+  while getopts "qw:d:hma:b:niltsrxyzp:" OPTION      # Process options
   do
     case $OPTION in
       h) usage ;;
@@ -390,6 +426,7 @@ cmdline() {
       w) WAIT_SECS=${OPTARG} ;;
       n) NO_SCREEN="y" ;;
       i) INTERACTIVE="y" ;;
+      q) set -x ;; #debug only
       l) COMMAND="y"
          snnm_list "$STARTPORT" "$ENDPORT" ;;
       t) COMMAND="y"
@@ -448,13 +485,19 @@ command_exists() { if command -v "$1" > /dev/null 2>&1;
   fi
 }
 environment_check() {
-  ! command_exists "safenode" && exit 1
-  [ ! "$NO_SCREEN" = "y" ] && ! command_exists "screen" && exit 1
-  [ "$INTERACTIVE" = "y" ] && ! command_exists "whiptail" && exit 1
+  ! command_exists "safenode" && echo "TERMINATED: Requires safenode installed" && exit 1
+  ! command_exists "netstat" && echo "TERMINADED: Requires netstat (net-tools) installed" && exit 1
+  [ ! "$NO_SCREEN" = "y" ] && ! command_exists "screen" && echo "TERMINATED: Option requires screen installed" && exit 1
+  [ "$INTERACTIVE" = "y" ] && ! command_exists "whiptail" && echo "TERMINATED: Option requires whiptail installed" && exit 1
 }
 
 main() {
   environment_check   # prerequisites check
+  mkdir -p "$NODE_DIR"
+  if [ ! -d "$NODE_DIR" ]; then
+    echo "Failed creating $NODE_DIR. Remedy before running snnm."
+    exit 1
+  fi
   cmdline "$@"        # pre-process cmd line parameters
   [ ! "$COMMAND" = "y" ] && snnm_update_cache #If no specific command was selected, update cached sn information
 }
