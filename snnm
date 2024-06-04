@@ -2,7 +2,7 @@
 # Kill and restart new node at same port number and with same peer-id
 
 #global variables readonly
-readonly VERSION="0.1.1"
+readonly VERSION="0.1.2"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -33,9 +33,14 @@ get_and_store_active_sn_pid() {
       local __PSPID
       __PSPID=$(ps -A | grep "safenode" | grep -E -o "($__PID) ")
       if [[ $__PSPID -ne $__PID ]]; then
-         #__PID=""
-         echo "WARNING: PID $__PID in cache was not found running! Updating cache but not considering dead yet."
-         rm "$NODE_DIR$__PEER_ID/PID"
+        __PSPID=$(ps -A | grep "safenode" | grep -o "[0-9]*" | head -1)
+        if [[ $__PSPID -gt 0 ]]; then
+          echo "WARNING: PID $__PID in cache was not found running! Actual PID seems to be $__PSPID. Updating cache."
+          __PID="$__PSPID"
+        else
+          echo "WARNING: PID $__PID in cache was not found running! Updating cache but not considering dead yet."
+          rm "$NODE_DIR$__PEER_ID/PID"
+        fi
       fi
     fi
   else
@@ -181,6 +186,7 @@ snnm_update_cache() {
   for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
     if [ -n "$__PEER_ID" ]; then
+      get_and_store_active_sn_pid "$__PEER_ID"
       local __PORT_CACHED
       if [ ! -f "$NODE_DIR$__PEER_ID/PORT" ]; then
         get_and_store_sn_port "$__PEER_ID"
@@ -452,7 +458,6 @@ usage() {
   echo "Version: $VERSION EXPERIMENTAL!!
         Usage: $0 [arguments]
         -h this help
-        -m enables safenode-manager mode - NOT IMPLEMENTED
         -p single port number of nodes to operate on
         -a start port number of nodes to operate on
         -b end port number of nodes to operate on
@@ -500,6 +505,8 @@ main() {
   fi
   cmdline "$@"        # pre-process cmd line parameters
   [ ! "$COMMAND" = "y" ] && snnm_update_cache #If no specific command was selected, update cached sn information
+  echo "snnm execution is done. In some cases you need to [Ctrl]+[c] to get back to your command prompt."
+  exit 0
 }
 
 # run only if script is not being sourced.
