@@ -212,6 +212,7 @@ snnm_list() {
   __FILE_LIST=$(ls "$NODE_DIR")
   local __PEER_ID_LIST
   __PEER_ID_LIST=$(snnm_extract_peer_id_list "${__FILE_LIST[@]}")
+  local __ITEMS_LIST=()
   for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
     if [ -n "$__PEER_ID" ]; then
@@ -221,10 +222,15 @@ snnm_list() {
         local __PID
         __PID=$(get_sn_pid "$__PEER_ID")
         #echo "| peer-id $__PEER_ID | pid $__PID | port $__PORT |" # screen safenode$__PORT |
-        printf "| port %6s | pid %8s | peer-id %s |\n" "$__PORT" "$__PID" "$__PEER_ID"
+        local __ITEM
+        __ITEM=$(printf "| port %6s | pid %8s | peer-id %s |\n" "$__PORT" "$__PID" "$__PEER_ID")
+        __ITEMS_LIST+=( "$__ITEM" )
       fi
     fi
   done
+  local __ITEMS_SORTED=()
+  IFS=$'\n' __ITEMS_SORTED=($(sort <<<"${__ITEMS_LIST[*]}")); unset IFS
+  printf  '%s\n' "${__ITEMS_SORTED[@]}"
 }
 
 snnm_terminate(){
