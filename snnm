@@ -2,7 +2,7 @@
 # Kill and restart new node at same port number and with same peer-id
 
 #global variables readonly
-readonly VERSION="0.1.3"
+readonly VERSION="0.1.4"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -33,7 +33,8 @@ get_and_store_active_sn_pid() {
       local __PSPID
       __PSPID=$(ps -A | grep "safenode" | grep -E -o "($__PID) ")
       if [[ $__PSPID -ne $__PID ]]; then
-        __PSPID=$(ps -A | grep "safenode" | grep -o "[0-9]*" | head -1)
+        #__PSPID=$(ps -A | grep "safenode" | grep -o "[0-9]*" | head -1)
+        __PSPID=$(lsof "$NODE_DIR$__PEER_ID/logs/safenode.log" | grep "safenode " | grep -o "[0-9]*" | head -1)
         if [[ $__PSPID -gt 0 ]]; then
           echo "WARNING: PID $__PID in cache was not found running! Actual PID seems to be $__PSPID. Updating cache."
           __PID="$__PSPID"
