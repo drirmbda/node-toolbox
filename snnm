@@ -34,7 +34,7 @@ get_and_store_active_sn_pid() {
       __PSPID=$(ps -A | grep "safenode" | grep -E -o "($__PID) ")
       if [[ $__PSPID -ne $__PID ]]; then
         #__PSPID=$(ps -A | grep "safenode" | grep -o "[0-9]*" | head -1)
-        __PSPID=$(lsof "$NODE_DIR$__PEER_ID/logs/safenode.log" | grep "safenode " | grep -o "[0-9]*" | head -1)
+        __PSPID=$(lsof -X "$NODE_DIR$__PEER_ID/logs/safenode.log" | grep "safenode " | grep -o "[0-9]*" | head -1)
         if [[ $__PSPID -gt 0 ]]; then
           echo "WARNING: PID $__PID in cache was not found running! Actual PID seems to be $__PSPID. Updating cache."
           __PID="$__PSPID"
@@ -47,7 +47,7 @@ get_and_store_active_sn_pid() {
     fi
   else
     if [ -f "$NODE_DIR$__PEER_ID/logs/safenode.log" ]; then
-      __PID=$(lsof "$NODE_DIR$__PEER_ID/logs/safenode.log" | grep "safenode " | grep -o "[0-9]*" | head -1)
+      __PID=$(lsof -X "$NODE_DIR$__PEER_ID/logs/safenode.log" | grep "safenode " | grep -o "[0-9]*" | head -1)
     else
       echo "WARNING: Logfile $NODE_DIR$__PEER_ID/logs/safenode.log Not Found! Make sure logging is enabled at node start."
     fi
