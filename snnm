@@ -2,7 +2,7 @@
 # Kill and restart new node at same port number and with same peer-id
 
 #global variables readonly
-readonly VERSION="0.1.5"
+readonly VERSION="0.1.6"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -428,7 +428,10 @@ cmdline() {
   while getopts "qw:d:hma:b:niltsrxyzp:" OPTION      # Process options
   do
     case $OPTION in
-      h) usage ;;
+      h) usage;
+        exit 1;;
+      v) echo "Version $VERSION";
+        exit 0;;
       m) NODE_MANAGER="y"
          #NODE_DIR="$NODE_DIR_NODEMGR"
           ;;
@@ -455,7 +458,7 @@ cmdline() {
          snnm_archive_dead ;;
       z) COMMAND="y"
          snnm_archive_portless ;;
-      ?) echo "Invalid option found: -${OPTARG}."
+      ?) echo "Invalid option found: -${OPTARG}. Check options with --help."
          exit 1 ;;
     esac
   done
@@ -463,27 +466,39 @@ cmdline() {
 }
 
 usage() {
-  echo "Version: $VERSION EXPERIMENTAL!!
-        Usage: $0 [arguments]
-        -h this help
-        -p single port number of nodes to operate on
-        -a start port number of nodes to operate on
-        -b end port number of nodes to operate on
-        -d set discord ID to use, or use none to disable, for all node (re)starts
-        -w wait time in seconds between launch of new nodes
-        -n run new nodes without using screen, simply running as disowned process
-        -i interactive mode, must precede the command switches it will apply to
-        Command switches, executed in order of appearance:
-        -l list nodes command
-        -t Terminate nodes command
-        -r Restart nodes that are not running at original ports command
-        -x eXchange, that is terminate and restart nodes at same ports
-        -s Start nodes in a port range unless a port already is associated with an existing peer-id
-        Maintenance command switches moving peer-id directories out of view into a nodearchive directory
-        -y archive all dead nodes (ignores any port restricting arguments) - MAY DISRUPT NODE STARTED IN UNSUPPORTED WAYS
-        -z archive all nodes without port associated in cache (ignores any port restricting arguments)
-        If no command switch is selected, update cached information on all peer ids."
-  exit 0
+  cat << EOF
+$0 (v.$VERSION) is EXPERIMENTAL, use at your own risk!
+USAGE: $0 [options and commands]
+
+Manage safenode nodes directly
+
+Options and commands are executed or applied in order of appearance. No command specified refreshes the cache.
+
+OPTIONS:
+   -h this help
+   -p single port number of nodes to operate on
+   -a start port number of nodes to operate on
+   -b end port number of nodes to operate on
+   -d set discord ID to use, or use none to disable, for all node (re)starts
+   -w wait time in seconds between launch of new nodes
+   -n run new nodes without using screen, simply running as disowned process
+   -i interactive mode, must precede the command switches it will apply to
+
+COMMANDS:
+   -l list nodes command
+   -t Terminate nodes command
+   -r Restart nodes that are not running at original ports command
+   -x eXchange, that is terminate and restart nodes at same ports
+   -s Start nodes in a port range unless a port already is associated with an existing peer-id
+
+COMMANDS with increased risk of breaking things, very much experimental at this time:
+   -y archive all dead nodes (ignores any port restricting arguments) - MAY DISRUPT NODE STARTED IN UNSUPPORTED WAYS
+   -z archive all nodes without port associated in cache (ignores any port restricting arguments)
+
+EXAMPLE:
+   $0 -a <lower_port_range_end> -b <upper_port_range_end> -d <discord_id> -w <pause_seconds> -s
+
+EOF
 }
 
 ########################################################################################################################
