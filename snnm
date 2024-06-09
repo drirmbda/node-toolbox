@@ -2,7 +2,7 @@
 # Kill and restart new node at same port number and with same peer-id
 
 #global variables readonly
-readonly VERSION="0.1.6"
+readonly VERSION="0.1.7"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -425,7 +425,7 @@ cmdline() {
   done
   eval set -- $args                                 # Reset the positional parameters to the short options
 
-  while getopts "qw:d:hma:b:niltsrxyzp:" OPTION      # Process options
+  while getopts "vqw:d:hma:b:niltsrxyzp:" OPTION      # Process options
   do
     case $OPTION in
       h) usage;
@@ -485,10 +485,10 @@ OPTIONS:
    -i interactive mode, must precede the command switches it will apply to
 
 COMMANDS:
-   -l list nodes command
-   -t Terminate nodes command
-   -r Restart nodes that are not running at original ports command
-   -x eXchange, that is terminate and restart nodes at same ports
+   -l List nodes
+   -t Terminate nodes (-w option does not apply)
+   -r Restart nodes that are not running at original ports
+   -x eXchange; terminate and restart nodes at same ports
    -s Start nodes in a port range unless a port already is associated with an existing peer-id
 
 COMMANDS with increased risk of breaking things, very much experimental at this time:
