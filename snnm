@@ -2,7 +2,7 @@
 # Kill and restart new node at same port number and with same peer-id
 
 #global variables readonly
-readonly VERSION="0.1.7"
+readonly VERSION="0.1.8"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -36,10 +36,10 @@ get_and_store_active_sn_pid() {
         #__PSPID=$(ps -A | grep "safenode" | grep -o "[0-9]*" | head -1)
         __PSPID=$(lsof -X "$NODE_DIR$__PEER_ID/logs/safenode.log" | grep "safenode " | grep -o "[0-9]*" | head -1)
         if [[ $__PSPID -gt 0 ]]; then
-          echo "WARNING: PID $__PID in cache was not found running! Actual PID seems to be $__PSPID. Updating cache."
+          echo "WARNING: PID $__PID in cache was not found running! Actual PID seems to be $__PSPID. Updating cache." >&2
           __PID="$__PSPID"
         else
-          echo "WARNING: PID $__PID in cache was not found running! Updating cache (deletion)."
+          echo "WARNING: PID $__PID in cache was not found running! Updating cache (deletion)." >&2
           __PID=""
           rm "$NODE_DIR$__PEER_ID/PID"
         fi
@@ -49,7 +49,7 @@ get_and_store_active_sn_pid() {
     if [ -f "$NODE_DIR$__PEER_ID/logs/safenode.log" ]; then
       __PID=$(lsof -X "$NODE_DIR$__PEER_ID/logs/safenode.log" | grep "safenode " | grep -o "[0-9]*" | head -1)
     else
-      echo "WARNING: Logfile $NODE_DIR$__PEER_ID/logs/safenode.log Not Found! Make sure logging is enabled at node start."
+      echo "WARNING: Logfile $NODE_DIR$__PEER_ID/logs/safenode.log Not Found! Make sure logging is enabled at node start." >&2
     fi
   fi
   if [[ "$__PID" -gt 0 ]]; then
@@ -146,7 +146,7 @@ snnm_node_starter() {
                           ARGSLINE="$ARGSLINE --log-output-dest $NODE_DIR$2/logs" ;;
       "$__MAXLOGS_FLAG")  ARGSLINE="$ARGSLINE $__MAXLOGS_FLAG=$2" ;;
       "$__MAXARCHLOGS_FLAG") ARGSLINE="$ARGSLINE $__MAXARCHLOGS_FLAG=$2" ;;
-      *) echo "Warning: Unrecognized argument name to snnm_node_starter: $1"
+      *) echo "WARNING: Unrecognized argument name to snnm_node_starter: $1" >&2
     esac
     shift 2
   done
@@ -161,8 +161,6 @@ snnm_node_starter() {
     echo "Starting screen -LdmS safenode$__PORT safenode $ARGSLINE"
     eval "screen -LdmS safenode$__PORT $SAFENODEPATH $ARGSLINE"
   fi
-  #sleep 1
-  #snnm_update_cache
 }
 
 #######################################################################################################################
@@ -255,7 +253,7 @@ snnm_terminate(){
         if [[ $__PID -gt 0 ]]; then
           kill "$__PID" && echo "Killed node with peer id $__PEER_ID and pid $__PID running at port $__PORT."
         else
-          echo "$__PEER_ID node already stopped running at port $__PORT."
+          echo "WARNING: $__PEER_ID node already stopped running at port $__PORT." >&2
         fi
       fi
     fi
@@ -281,7 +279,7 @@ snnm_restart(){
         local __PID
         __PID=$(get_and_store_active_sn_pid "$__PEER_ID")
         if [[ $__PID -gt 0 ]]; then
-          echo "$__PEER_ID node already running, at port $__PORT."
+          echo "WARNING: $__PEER_ID node already running, at port $__PORT." >&2
         else
           echo "Restarting node with peer id $__PEER_ID running at port $__PORT."
           local __MAXLOGS=1
@@ -346,7 +344,7 @@ snnm_start(){
         local __PORT
         __PORT=$(get_sn_port "$__PEER_ID")
         if [[ $__PORT -eq $__TARGETPORT ]]; then
-          echo "$__TARGETPORT already associated with peer-id $__PEER_ID. Use restart instead if it is dead."
+          echo "WARNING: $__TARGETPORT already associated with peer-id $__PEER_ID. Use restart instead if it is dead." >&2
           __TARGET_PORT_FOUND="$__PEER_ID"
         fi
       fi
