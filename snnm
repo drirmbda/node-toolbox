@@ -2,7 +2,7 @@
 # Kill and restart new node at same port number and with same peer-id
 
 #global variables readonly
-readonly VERSION="0.2.1"
+readonly VERSION="0.2.2"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -269,6 +269,7 @@ snnm_list() {
   local __PEER_ID_LIST
   __PEER_ID_LIST=$(snnm_extract_peer_id_list "${__FILE_LIST[@]}")
   local __PEERS_TOTAL="0"
+  local __FORWARDED_TOTAL="0"
   local __ITEMS_LIST=()
   for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
@@ -294,16 +295,22 @@ snnm_list() {
             local __RPC_PEERS
             __RPC_PEERS=$(echo "$__RPC_JSON" | jq -M .connectedPeers? | wc -l )
             __PEERS_TOTAL=$((__PEERS_TOTAL+__RPC_PEERS))
-            __RPC_INFO="v.$__RPC_BIN, $__RPC_PEERS peers, uptime $__RPC_UPTIME s;"
+            __RPC_INFO="v.$__RPC_BIN, $__RPC_PEERS peers, uptime $__RPC_UPTIME s"
           fi
         fi
+        local __FORWARDED_BALANCE=""
+        if [[ -f "$NODE_DIR$__PEER_ID/forwarded_balance" ]]; then
+          __FORWARDED_BALANCE=$(cat "$NODE_DIR$__PEER_ID/forwarded_balance")
+          __FORWARDED_TOTAL=$((__FORWARDED_TOTAL+__FORWARDED_BALANCE))
+          __FORWARDED_BALANCE=$(printf "fwd_nanos: %s" "$__FORWARDED_BALANCE")
+        fi
         local __ITEM
-        __ITEM=$(printf "| port %6s | pid %8s | peer-id %s | %s\n" "$__PORT" "$__PID" "$__PEER_ID" "$__RPC_INFO")
+        __ITEM=$(printf "| port %6s | pid %8s | peer-id %s | %s $__FORWARDED_BALANCE\n" "$__PORT" "$__PID" "$__PEER_ID" "$__RPC_INFO")
         __ITEMS_LIST+=( "$__ITEM" )
       fi
     fi
   done
-  [ -n "$RPC_SHOW" ] && printf "\rTotal peers: %-10s \n" "$__PEERS_TOTAL"
+  [ -n "$RPC_SHOW" ] && printf "\rTotal connected peers: %-10s Total forwarded nanos: %-16s\n" "$__PEERS_TOTAL" "$__FORWARDED_TOTAL"
   local __ITEMS_SORTED=()
   IFS=$'\n' __ITEMS_SORTED=($(sort <<<"${__ITEMS_LIST[*]}")); unset IFS
   printf  '%s\n' "${__ITEMS_SORTED[@]}"
