@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.2.7"
+readonly VERSION="0.2.8"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -188,7 +188,7 @@ snnm_extract_peer_id_list() {
     if [ "${#__PEER_ID}" -eq "52" ] ;then        # peer-ids happen to be 52 characters long.
       __FILTERED_LIST+=( "$__PEER_ID" )
     else
-      echo "omitting non-peer-id item $__PEER_ID"
+      echo "omitting non-peer-id item $__PEER_ID" >&2
     fi
   done
   echo "${__FILTERED_LIST[@]}"
