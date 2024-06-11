@@ -1,8 +1,7 @@
 #!/bin/bash
-# Kill and restart new node at same port number and with same peer-id
 
 #global variables readonly
-readonly VERSION="0.2.2"
+readonly VERSION="0.2.2a"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -310,7 +309,7 @@ snnm_list() {
       fi
     fi
   done
-  [ -n "$RPC_SHOW" ] && printf "\rTotal connected peers: %-10s Total forwarded nanos: %-16s\n" "$__PEERS_TOTAL" "$__FORWARDED_TOTAL"
+  [ -n "$RPC_SHOW" ] && printf "\rTotal connected peers (nodes with rpc port only): %-10s Total forwarded nanos: %-16s\n" "$__PEERS_TOTAL" "$__FORWARDED_TOTAL"
   local __ITEMS_SORTED=()
   IFS=$'\n' __ITEMS_SORTED=($(sort <<<"${__ITEMS_LIST[*]}")); unset IFS
   printf  '%s\n' "${__ITEMS_SORTED[@]}"
