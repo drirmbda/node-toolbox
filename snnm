@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.2.5"
+readonly VERSION="0.2.6"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -315,11 +315,11 @@ snnm_list() {
             __RPC_UPTIME=$(echo "$__RPC_JSON" | jq -M .uptimeSecs? )
             __RPC_JSON=$(get_sn_rpc_nodeinfo "$__RPC_ADDRESS" "NetworkInfo" )
             local __RPC_PEERS
-            __RPC_PEERS=$(echo "$__RPC_JSON" | jq -M .connectedPeers? | wc -l )
+            __RPC_PEERS=$(echo "$__RPC_JSON" | jq -M .connectedPeers[]? | wc -l )
             __PEERS_TOTAL=$((__PEERS_TOTAL+__RPC_PEERS))
             __RPC_JSON=$(get_sn_rpc_nodeinfo "$__RPC_ADDRESS" "RecordAddresses" )
             local __RPC_RECORDS
-            __RPC_RECORDS=$(echo "$__RPC_JSON" | jq -M .addresses? | wc -l )
+            __RPC_RECORDS=$(echo "$__RPC_JSON" | jq -M .addresses[]? | wc -l )
             __RECORDS_TOTAL=$((__RECORDS_TOTAL+__RPC_RECORDS))
             __RPC_INFO=$(printf "v.%-10s | %6s peers | %6s records | %10ss uptime | " "$__RPC_BIN" "$__RPC_PEERS" "$__RPC_RECORDS" "$__RPC_UPTIME")
           fi
