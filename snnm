@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.2.2a"
+readonly VERSION="0.2.3"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -133,10 +133,12 @@ get_sn_rpc_address_for_pid(){
   else
     __RPC_ADDRESS=$(cat "$NODE_DIR$__PEER_ID/RPCPORT");
     local __RESPONSE
-    __RESPONSE=$(grpcurl -plaintext -import-path "$RPC_PROTO_PATH" -proto "safenode.proto" -proto "req_resp_types.proto" "$__RPC_ADDRESS" "safenode_proto.SafeNode/NodeInfo")
-    if [[ ! -n "$__RESPONSE" ]]; then
-      rm "$NODE_DIR$__PEER_ID/RPCPORT"
-      __RPC_ADDRESS=""
+    if [[ -n "$__RPC_ADDRESS" ]]; then
+      __RESPONSE=$(grpcurl -plaintext -import-path "$RPC_PROTO_PATH" -proto "safenode.proto" -proto "req_resp_types.proto" "$__RPC_ADDRESS" "safenode_proto.SafeNode/NodeInfo")
+      if [[ ! -n "$__RESPONSE" ]]; then
+        rm "$NODE_DIR$__PEER_ID/RPCPORT"
+        __RPC_ADDRESS=""
+      fi
     fi
   fi
   [[ -n "$__RPC_ADDRESS" ]] && echo "$__RPC_ADDRESS"
