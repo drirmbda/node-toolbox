@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.2.3"
+readonly VERSION="0.2.5"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -155,6 +155,26 @@ get_sn_rpc_nodeinfo(){
   fi
 }
 
+#usage: get_sn_rpc_dump <rpc_address>
+get_sn_rpc_dump(){
+  local __RPC_ADDRESS=$1
+  if [[ -n "$__RPC_ADDRESS" && -n "$RPC_SUPPORT_CHECK_RESULT" ]]; then
+    local $__RPC_CALL
+    __RPC_CALL="NodeInfo"
+    __RESPONSE=$(grpcurl -plaintext -import-path "$RPC_PROTO_PATH" -proto "safenode.proto" -proto "req_resp_types.proto" "$__RPC_ADDRESS" "safenode_proto.SafeNode/$__RPC_CALL" | jq . )
+    echo "$__RESPONSE"
+    __RPC_CALL="NetworkInfo"
+    __RESPONSE=$(grpcurl -plaintext -import-path "$RPC_PROTO_PATH" -proto "safenode.proto" -proto "req_resp_types.proto" "$__RPC_ADDRESS" "safenode_proto.SafeNode/$__RPC_CALL" | jq . )
+    echo "$__RESPONSE"
+    __RPC_CALL="RecordAddresses"
+    __RESPONSE=$(grpcurl -plaintext -import-path "$RPC_PROTO_PATH" -proto "safenode.proto" -proto "req_resp_types.proto" "$__RPC_ADDRESS" "safenode_proto.SafeNode/$__RPC_CALL" | jq . )
+    echo "$__RESPONSE"
+    __RPC_CALL="KBuckets"
+    __RESPONSE=$(grpcurl -plaintext -import-path "$RPC_PROTO_PATH" -proto "safenode.proto" -proto "req_resp_types.proto" "$__RPC_ADDRESS" "safenode_proto.SafeNode/$__RPC_CALL" | jq . )
+    echo "$__RESPONSE"
+  fi
+}
+
 ########################################################################################################################
 # Safenode-manager support
 ########################################################################################################################
@@ -271,6 +291,7 @@ snnm_list() {
   __PEER_ID_LIST=$(snnm_extract_peer_id_list "${__FILE_LIST[@]}")
   local __PEERS_TOTAL="0"
   local __FORWARDED_TOTAL="0"
+  local __RECORDS_TOTAL="0"
   local __ITEMS_LIST=()
   for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
@@ -296,7 +317,11 @@ snnm_list() {
             local __RPC_PEERS
             __RPC_PEERS=$(echo "$__RPC_JSON" | jq -M .connectedPeers? | wc -l )
             __PEERS_TOTAL=$((__PEERS_TOTAL+__RPC_PEERS))
-            __RPC_INFO="v.$__RPC_BIN, $__RPC_PEERS peers, uptime $__RPC_UPTIME s"
+            __RPC_JSON=$(get_sn_rpc_nodeinfo "$__RPC_ADDRESS" "RecordAddresses" )
+            local __RPC_RECORDS
+            __RPC_RECORDS=$(echo "$__RPC_JSON" | jq -M .addresses? | wc -l )
+            __RECORDS_TOTAL=$((__RECORDS_TOTAL+__RPC_RECORDS))
+            __RPC_INFO=$(printf "v.%-10s | %6s peers | %6s records | %10ss uptime | " "$__RPC_BIN" "$__RPC_PEERS" "$__RPC_RECORDS" "$__RPC_UPTIME")
           fi
         fi
         local __FORWARDED_BALANCE=""
@@ -306,15 +331,16 @@ snnm_list() {
           __FORWARDED_BALANCE=$(printf "fwd_nanos: %s" "$__FORWARDED_BALANCE")
         fi
         local __ITEM
-        __ITEM=$(printf "| port %6s | pid %8s | peer-id %s | %s $__FORWARDED_BALANCE\n" "$__PORT" "$__PID" "$__PEER_ID" "$__RPC_INFO")
+        __ITEM=$(printf "| port %6s | pid %8s | peer-id %s | %s$__FORWARDED_BALANCE\n" "$__PORT" "$__PID" "$__PEER_ID" "$__RPC_INFO")
         __ITEMS_LIST+=( "$__ITEM" )
       fi
     fi
   done
-  [ -n "$RPC_SHOW" ] && printf "\rTotal connected peers (nodes with rpc port only): %-10s Total forwarded nanos: %-16s\n" "$__PEERS_TOTAL" "$__FORWARDED_TOTAL"
+  [ -n "$RPC_SHOW" ] && echo ""
   local __ITEMS_SORTED=()
   IFS=$'\n' __ITEMS_SORTED=($(sort <<<"${__ITEMS_LIST[*]}")); unset IFS
   printf  '%s\n' "${__ITEMS_SORTED[@]}"
+  [ -n "$RPC_SHOW" ] && printf "Total connected peers (nodes with rpc port only): %-10s Total records (nodes with rpc port only): %-10s Total forwarded nanos: %-16s\n" "$__PEERS_TOTAL" "$__RECORDS_TOTAL" "$__FORWARDED_TOTAL"
 }
 
 snnm_terminate(){
