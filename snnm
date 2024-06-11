@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.2.6"
+readonly VERSION="0.2.7"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -340,7 +340,9 @@ snnm_list() {
   local __ITEMS_SORTED=()
   IFS=$'\n' __ITEMS_SORTED=($(sort <<<"${__ITEMS_LIST[*]}")); unset IFS
   printf  '%s\n' "${__ITEMS_SORTED[@]}"
-  [ -n "$RPC_SHOW" ] && printf "Total connected peers (nodes with rpc port only): %-10s Total records (nodes with rpc port only): %-10s Total forwarded nanos: %-16s\n" "$__PEERS_TOTAL" "$__RECORDS_TOTAL" "$__FORWARDED_TOTAL"
+  [ -n "$RPC_SHOW" ] && echo "Total connected peers (for nodes with rpc port only): $__PEERS_TOTAL"
+  [ -n "$RPC_SHOW" ] && echo "Total records (for nodes with rpc port only): $__RECORDS_TOTAL"
+  [ -n "$RPC_SHOW" ] && echo "Total forwarded nanos: $__FORWARDED_TOTAL"
 }
 
 snnm_terminate(){
