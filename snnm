@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.2.8"
+readonly VERSION="0.2.9"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -655,6 +655,7 @@ environment_check() {
   [ "$INTERACTIVE" = "y" ] && ! command_exists "whiptail" && echo "TERMINATED: Option requires whiptail installed" && exit 1
   [ "$RPC_ENABLE" = "y" ] && ! command_exists "grpcurl" && echo "WARNING: To utilize RPC port on nodes you need grpcurl and .proto files installed"
   [ "$RPC_ENABLE" = "y" ] && command_exists "grpcurl" # check proto files at RPC_PROTO_PATH
+  [ -f "$RPC_PROTO_PATH/.local/bin/safenode.proto" ] && RPC_PROTO_PATH="$HOME/.local/bin"
   [ "$RPC_ENABLE" = "y" ] && ! command_exists "jq" && echo "WARNING: To utilize RPC related function you need jq installed"  # dnf install -y jq
   #enable functionality based on command availability
   command_exists "grpcurl" && command_exists "jq" && RPC_SUPPORT_CHECK_RESULT="y"
