@@ -2,12 +2,12 @@
 # Kill and restart new node at same port number and with same peer-id
 
 #global variables readonly
-readonly VERSION="0.1.10"
+readonly VERSION="0.2.0"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
 ENDPORT=65535                             # Default upper end of port range, inclusive
-WAIT_SECS=5                                     # Default wait between new node starts
+WAIT_SECS=10                              # Default wait between new node starts
 SAFENODEPATH="$HOME/.local/bin/safenode"  # Default safenode binary, full path
 NODE_DIR="$HOME/.local/share/safe/node/"  # Default location of peer_id directories
 NODE_ARCHIVE_DIR="$NODE_DIR/../node_archive/"  # location to archive peer-id directories out of the way
@@ -16,6 +16,11 @@ NODE_MANAGER=""                           # "y" indicates selection of safenode-
 INTERACTIVE=""                            # "y" indicates selection of interactive mode with TUI or GUI, not the default
 NO_SCREEN="y"                             # "y" indicates running of new nodes without using screen utility
 COMMAND=""                                # "y" indicates a specific function was selected
+RPC_PROTO_PATH="$HOME"                    # Default location of .proto files compatible with safenode binary
+RPC_ENABLE=""                             # "y" indicates rpc port should be set at start
+RPC_BASE_PORT=30000                       # the base is the port ID for the first node started with RPC_ENABLE enabled in a call
+NODE_BASE_PORT=50000                      # the RPC_PORT becomes node port - NODE_BASE_PORT + RPC_BASE_PORT
+RPC_SUPPORT_CHECK_RESULT=""               # "y" indicates JSON processor jq is available (set automatically in code below)
 
 #if xhost >& /dev/null ; then readonly HAVEDISP="y" ; fi # check if display server is running to replace TUI by GUI
 
@@ -113,6 +118,29 @@ get_sn_port() {
   [ ! -f "$NODE_DIR$__PEER_ID/PORT" ] && get_and_store_sn_port "$__PEER_ID"
   [ -f "$NODE_DIR$__PEER_ID/PORT" ] && __PORT=$(cat "$NODE_DIR$__PEER_ID/PORT")
   echo "$__PORT"
+}
+
+########################################################################################################################
+# RPC support
+########################################################################################################################
+
+#usage: get_sn_rpc_address_for_pid <pid>
+get_sn_rpc_address_for_pid(){
+  local __RPC_ADDRESS
+  local __PID="$1"
+  __RPC_ADDRESS=$(netstat -tnlp 2> /dev/null | grep " $__PID/safenode " | grep -E -o "127.0.0.1:([0-9]*)")
+  [[ -n "$__RPC_ADDRESS" ]] && echo "$__RPC_ADDRESS"
+}
+
+#usage: get_sn_rpc_info <rpc_address> <rpc_call> where <rpc_call> must be something like NodeInfo or NetworkInfo
+get_sn_rpc_nodeinfo(){
+  local __RPC_ADDRESS=$1
+  local __RPC_CALL=$2
+  local __RESPONSE=""
+  if [[ -n "$__RPC_ADDRESS" && -n "$RPC_SUPPORT_CHECK_RESULT" ]]; then
+    __RESPONSE=$(grpcurl -plaintext -import-path "$RPC_PROTO_PATH" -proto "safenode.proto" -proto "req_resp_types.proto" "$__RPC_ADDRESS" "safenode_proto.SafeNode/$__RPC_CALL")
+    echo "$__RESPONSE"
+  fi
 }
 
 ########################################################################################################################
@@ -233,18 +261,36 @@ snnm_list() {
   for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
     if [ -n "$__PEER_ID" ]; then
+      [ -n "$RPC_SHOW" ] && echo -n "."
       local __PORT
       __PORT=$(get_sn_port "$__PEER_ID")
       if [[ $__PORT -le $__ENDPORT && $__PORT -ge $__STARTPORT ]]; then
         local __PID
         __PID=$(get_sn_pid "$__PEER_ID")
-        #echo "| peer-id $__PEER_ID | pid $__PID | port $__PORT |" # screen safenode$__PORT |
+        local __RPC_INFO=""
+        if [[ "$__PID" -gt 0 && -n "$RPC_SHOW" && -n "$RPC_SUPPORT_CHECK_RESULT" ]]; then
+          local __RPC_ADDRESS
+          __RPC_ADDRESS=$(get_sn_rpc_address_for_pid "$__PID")
+          if [[ -n "$__RPC_ADDRESS" ]]; then
+            local __RPC_JSON
+            __RPC_JSON=$(get_sn_rpc_nodeinfo "$__RPC_ADDRESS" "NodeInfo" )
+            local __RPC_BIN
+            __RPC_BIN=$(echo "$__RPC_JSON" | jq -M .binVersion? )
+            local __RPC_UPTIME
+            __RPC_UPTIME=$(echo "$__RPC_JSON" | jq -M .uptimeSecs? )
+            __RPC_JSON=$(get_sn_rpc_nodeinfo "$__RPC_ADDRESS" "NetworkInfo" )
+            local __RPC_PEERS
+            __RPC_PEERS=$(echo "$__RPC_JSON" | jq -M .connectedPeers? | wc -l )
+            __RPC_INFO="v.$__RPC_BIN, $__RPC_PEERS peers, uptime $__RPC_UPTIME s;"
+          fi
+        fi
         local __ITEM
-        __ITEM=$(printf "| port %6s | pid %8s | peer-id %s |\n" "$__PORT" "$__PID" "$__PEER_ID")
+        __ITEM=$(printf "| port %6s | pid %8s | peer-id %s | %s\n" "$__PORT" "$__PID" "$__PEER_ID" "$__RPC_INFO")
         __ITEMS_LIST+=( "$__ITEM" )
       fi
     fi
   done
+  [ -n "$RPC_SHOW" ] && echo " done."
   local __ITEMS_SORTED=()
   IFS=$'\n' __ITEMS_SORTED=($(sort <<<"${__ITEMS_LIST[*]}")); unset IFS
   printf  '%s\n' "${__ITEMS_SORTED[@]}"
@@ -302,8 +348,14 @@ snnm_restart(){
           echo "Restarting node with peer id $__PEER_ID running at port $__PORT."
           local __MAXLOGS="1"
           local __MAXARCHLOGS="0"
-          #local __RPC_PORT="none"
-          snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__PORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS" "--peer_id" "$__PEER_ID"
+          local __RPC_PORT=""
+          [ "$RPC_ENABLE" = "y" ] && __RPC_PORT=$((__PORT-NODE_BASE_PORT+RPC_BASE_PORT))
+          if [[ $__RPC_PORT -gt 0 && ! $(netstat -tunlp | grep $__RPC_PORT) ]]; then
+            echo "Restarting node with RPC_ENABLE at 127.0.0.1:$__RPC_PORT."
+            snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__PORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS" "--peer_id" "$__PEER_ID" "--rpc" "127.0.0.1:$__RPC_PORT"
+          else
+            snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__PORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS" "--peer_id" "$__PEER_ID"
+          fi
           sleep "$WAIT_SECS"
           snnm_update_cache
         fi
@@ -371,8 +423,14 @@ snnm_start(){
       echo "Starting node with new peer id at port $__TARGETPORT."
       local __MAXLOGS=1
       local __MAXARCHLOGS=0
-      #local __RPC_PORT="none"
-      snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__TARGETPORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS"
+      local __RPC_PORT=""
+      [ "$RPC_ENABLE" = "y" ] && __RPC_PORT=$((__TARGETPORT-NODE_BASE_PORT+RPC_BASE_PORT))
+      if [[ $__RPC_PORT -gt 0 && ! $(netstat -tunlp | grep) ]]; then
+        echo "Starting node with RPC_ENABLE at 127.0.0.1:$__RPC_PORT."
+        snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__TARGETPORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS" "--rpc" "127.0.0.1:$__RPC_PORT"
+      else
+        snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__TARGETPORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS"
+      fi
       sleep "$WAIT_SECS"
       snnm_update_cache
     fi
@@ -441,7 +499,7 @@ cmdline() {
   done
   eval set -- $args                                 # Reset the positional parameters to the short options
 
-  while getopts "cvqw:d:hma:b:niltsrxyzp:" OPTION      # Process options
+  while getopts "Lecvqw:d:hma:b:niltsrxyzp:" OPTION      # Process options
   do
     case $OPTION in
       h) usage;
@@ -459,8 +517,12 @@ cmdline() {
       w) WAIT_SECS=${OPTARG} ;;
       n) NO_SCREEN="y" ;;
       i) INTERACTIVE="y" ;;
+      e) RPC_ENABLE="y" ;;
       q) set -x ;; #debug only
       l) COMMAND="y"
+         snnm_list "$STARTPORT" "$ENDPORT" ;;
+      L) COMMAND="y"
+         local RPC_SHOW="y"
          snnm_list "$STARTPORT" "$ENDPORT" ;;
       c) COMMAND="y"
          snnm_update_cache ;;
@@ -499,6 +561,7 @@ OPTIONS:
    -b end port number of nodes to operate on
    -d set discord ID to use, or use none to disable, for all node (re)starts
    -w wait time in seconds between launch of new nodes
+   -e enable RPC on node at (re)start for enhanced functionality. Computed as: PORT-NODE_BASE($NODE_BASE_PORT)+RPC_BASE($RPC_BASE_PORT)
    -n run new nodes without using screen, simply running as disowned process
    -i interactive mode, must precede the command switches it will apply to
 
@@ -516,6 +579,11 @@ COMMANDS with increased risk of breaking things, very much experimental at this 
 
 EXAMPLE:
    $0 -a <lower_port_range_end> -b <upper_port_range_end> -d <discord_id> -w <pause_seconds> -s
+
+NOTE:
+   For all full functionality to be available install screen, whiptail, grpcurl and jq, and make sure that the
+   .proto files safenode.proto and req_resp_types.proto are placed in $RPC_PROTO_PATH. The files can be downloaded here:
+   https://github.com/maidsafe/safe_network/tree/main/sn_protocol/src/safenode_proto.
 
 EOF
 }
@@ -536,6 +604,11 @@ environment_check() {
   ! command_exists "netstat" && echo "TERMINADED: Requires netstat (net-tools) installed" && exit 1
   [ ! "$NO_SCREEN" = "y" ] && ! command_exists "screen" && echo "TERMINATED: Option requires screen installed" && exit 1
   [ "$INTERACTIVE" = "y" ] && ! command_exists "whiptail" && echo "TERMINATED: Option requires whiptail installed" && exit 1
+  [ "$RPC_ENABLE" = "y" ] && ! command_exists "grpcurl" && echo "WARNING: To utilize RPC port on nodes you need grpcurl and .proto files installed"
+  [ "$RPC_ENABLE" = "y" ] && command_exists "grpcurl" # check proto files at RPC_PROTO_PATH
+  [ "$RPC_ENABLE" = "y" ] && ! command_exists "jq" && echo "WARNING: To utilize RPC related function you need jq installed"  # dnf install -y jq
+  #enable functionality based on command availability
+  command_exists "grpcurl" && command_exists "jq" && RPC_SUPPORT_CHECK_RESULT="y"
 }
 
 main() {
