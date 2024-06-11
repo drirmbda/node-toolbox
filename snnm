@@ -2,7 +2,7 @@
 # Kill and restart new node at same port number and with same peer-id
 
 #global variables readonly
-readonly VERSION="0.2.0"
+readonly VERSION="0.2.1"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -11,7 +11,7 @@ WAIT_SECS=10                              # Default wait between new node starts
 SAFENODEPATH="$HOME/.local/bin/safenode"  # Default safenode binary, full path
 NODE_DIR="$HOME/.local/share/safe/node/"  # Default location of peer_id directories
 NODE_ARCHIVE_DIR="$NODE_DIR/../node_archive/"  # location to archive peer-id directories out of the way
-#NODE_DIR_NODEMGR="/var/log/safenode/"     # Default location of peer_id dirs when started with safenode-manager
+#NODE_DIR_NODEMGR="/var/log/safenode/"    # Default location of peer_id dirs when started with safenode-manager
 NODE_MANAGER=""                           # "y" indicates selection of safenode-manager use-case, not the default
 INTERACTIVE=""                            # "y" indicates selection of interactive mode with TUI or GUI, not the default
 NO_SCREEN="y"                             # "y" indicates running of new nodes without using screen utility
@@ -128,7 +128,18 @@ get_sn_port() {
 get_sn_rpc_address_for_pid(){
   local __RPC_ADDRESS
   local __PID="$1"
-  __RPC_ADDRESS=$(netstat -tnlp 2> /dev/null | grep " $__PID/safenode " | grep -E -o "127.0.0.1:([0-9]*)")
+  if [[ ! -f "$NODE_DIR$__PEER_ID/RPCPORT" ]]; then
+    __RPC_ADDRESS=$(netstat -tnlp 2> /dev/null | grep " $__PID/safenode " | grep -E -o "127.0.0.1:([0-9]*)")
+    echo "$__RPC_ADDRESS" > "$NODE_DIR$__PEER_ID/RPCPORT"
+  else
+    __RPC_ADDRESS=$(cat "$NODE_DIR$__PEER_ID/RPCPORT");
+    local __RESPONSE
+    __RESPONSE=$(grpcurl -plaintext -import-path "$RPC_PROTO_PATH" -proto "safenode.proto" -proto "req_resp_types.proto" "$__RPC_ADDRESS" "safenode_proto.SafeNode/NodeInfo")
+    if [[ ! -n "$__RESPONSE" ]]; then
+      rm "$NODE_DIR$__PEER_ID/RPCPORT"
+      __RPC_ADDRESS=""
+    fi
+  fi
   [[ -n "$__RPC_ADDRESS" ]] && echo "$__RPC_ADDRESS"
 }
 
@@ -257,6 +268,7 @@ snnm_list() {
   __FILE_LIST=$(ls "$NODE_DIR")
   local __PEER_ID_LIST
   __PEER_ID_LIST=$(snnm_extract_peer_id_list "${__FILE_LIST[@]}")
+  local __PEERS_TOTAL="0"
   local __ITEMS_LIST=()
   for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
@@ -281,6 +293,7 @@ snnm_list() {
             __RPC_JSON=$(get_sn_rpc_nodeinfo "$__RPC_ADDRESS" "NetworkInfo" )
             local __RPC_PEERS
             __RPC_PEERS=$(echo "$__RPC_JSON" | jq -M .connectedPeers? | wc -l )
+            __PEERS_TOTAL=$((__PEERS_TOTAL+__RPC_PEERS))
             __RPC_INFO="v.$__RPC_BIN, $__RPC_PEERS peers, uptime $__RPC_UPTIME s;"
           fi
         fi
@@ -290,7 +303,7 @@ snnm_list() {
       fi
     fi
   done
-  [ -n "$RPC_SHOW" ] && echo " done."
+  [ -n "$RPC_SHOW" ] && printf "\rTotal peers: %-10s \n" "$__PEERS_TOTAL"
   local __ITEMS_SORTED=()
   IFS=$'\n' __ITEMS_SORTED=($(sort <<<"${__ITEMS_LIST[*]}")); unset IFS
   printf  '%s\n' "${__ITEMS_SORTED[@]}"
