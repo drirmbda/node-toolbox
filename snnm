@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.2.10"
+readonly VERSION="0.2.11"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -567,7 +567,7 @@ cmdline() {
       w) WAIT_SECS=${OPTARG} ;;
       n) NO_SCREEN="y" ;;
       i) INTERACTIVE="y" ;;
-      e) RPC_ENABLE="y"
+      e) RPC_ENABLE="y" ;;
       q) set -x ;; #debug only
       l) COMMAND="y"
          snnm_list "$STARTPORT" "$ENDPORT" ;;
