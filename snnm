@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.2.11"
+readonly VERSION="0.2.12"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -661,7 +661,7 @@ environment_check() {
   [ "$RPC_ENABLE" = "y" ] && ! command_exists "jq" && echo "WARNING: To utilize RPC related function you need jq installed"  # dnf install -y jq
   #enable functionality based on command availability
   command_exists "grpcurl" && command_exists "jq" && RPC_SUPPORT_CHECK_RESULT="y"
-  [ -n "$RPC_SHOW" && ! -n "$RPC_SUPPORT_CHECK_RESULT" ] && echo "WARNING: RPC calls not enabled. Ensure grpcurl and jq are both installed."
+  [ -n "$RPC_SHOW" ] && [ ! -n "$RPC_SUPPORT_CHECK_RESULT" ] && echo "WARNING: RPC calls not enabled. Ensure grpcurl and jq are both installed."
 }
 
 main() {
