@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.2.12"
+readonly VERSION="0.2.14"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -136,10 +136,13 @@ get_sn_rpc_address_for_pid(){
     local __RESPONSE
     if [[ -n "$__RPC_ADDRESS" ]]; then
       __RESPONSE=$(grpcurl -plaintext -import-path "$RPC_PROTO_PATH" -proto "safenode.proto" -proto "req_resp_types.proto" "$__RPC_ADDRESS" "safenode_proto.SafeNode/NodeInfo")
-      if [[ ! -n "$__RESPONSE" ]]; then
+      if [[ -z "$__RESPONSE" ]]; then
         rm "$NODE_DIR$__PEER_ID/RPCPORT"
         __RPC_ADDRESS=""
       fi
+    else
+      __RPC_ADDRESS=$(netstat -tnlp 2> /dev/null | grep " $__PID/safenode " | grep -E -o "127.0.0.1:([0-9]*)")
+      echo "$__RPC_ADDRESS" > "$NODE_DIR$__PEER_ID/RPCPORT"
     fi
   fi
   [[ -n "$__RPC_ADDRESS" ]] && echo "$__RPC_ADDRESS"
@@ -264,7 +267,8 @@ snnm_update_cache() {
   for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
     if [ -n "$__PEER_ID" ]; then
-      get_and_store_active_sn_pid "$__PEER_ID"
+      local __PID
+      __PID=$(get_and_store_active_sn_pid "$__PEER_ID")
       local __PORT_CACHED
       if [ ! -f "$NODE_DIR$__PEER_ID/PORT" ]; then
         get_and_store_sn_port "$__PEER_ID"
@@ -275,6 +279,7 @@ snnm_update_cache() {
           echo "Failed finding port, node is probably not running. Archive peer-id or restart interactively at an available port."
         fi
       fi
+      get_sn_rpc_address_for_pid "$__PID" "$__PEER_ID"
     fi
   done
 }
