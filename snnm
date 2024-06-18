@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.2.14"
+readonly VERSION="0.2.15"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=1000                            # Default lower end of port range, inclusive
@@ -114,7 +114,7 @@ get_sn_pid() {
 get_sn_port() {
   local __PEER_ID="$1"
   local __PORT=""
-  [ ! -f "$NODE_DIR$__PEER_ID/PORT" ] && get_and_store_sn_port "$__PEER_ID"
+  [ ! -f "$NODE_DIR$__PEER_ID/PORT" ] && __PORT=$(get_and_store_sn_port "$__PEER_ID")
   [ -f "$NODE_DIR$__PEER_ID/PORT" ] && __PORT=$(cat "$NODE_DIR$__PEER_ID/PORT")
   echo "$__PORT"
 }
@@ -229,7 +229,7 @@ snnm_node_starter() {
       "$__MAXARCHLOGS_FLAG") ARGSLINE="$ARGSLINE $__MAXARCHLOGS_FLAG=$2" ;;
       *) echo "WARNING: Unrecognized argument name to snnm_node_starter: $1" >&2
     esac
-    shift 2
+    shift 2   #move $1 and $2 on to point to next args pair
   done
   echo "Target port: $__PORT (interactive mode:$INTERACTIVE; no_screen:$NO_SCREEN)..."
   if [ "$INTERACTIVE" = "y" ]; then
@@ -449,6 +449,7 @@ snnm_terminate_and_restart() {
   done
 }
 
+#usage snnm_start <start port> <end port>
 snnm_start(){
   local __DISCORD_ID="$OWNER_DISCORD_ID"
   local __STARTPORT="$STARTPORT"
@@ -487,8 +488,33 @@ snnm_start(){
         snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__TARGETPORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS"
       fi
       sleep "$WAIT_SECS"
-      snnm_update_cache
+      #snnm_update_cache  #disabled, to speed up node start, useful when running hundreds of nodes
     fi
+  done
+}
+
+#snnm_start without checking for existing node running at target ports. If there is conflict the node start will error.
+#usage snnm_start <start port> <end port> # uses WAIT_SECS, OWNER_DISCORD_ID=drirmbda_73081, NODE_BASE_PORT=50000, RPC_BASE_PORT=30000
+snnm_start_fast(){
+  local __DISCORD_ID="$OWNER_DISCORD_ID"
+  local __STARTPORT="$STARTPORT"
+  local __ENDPORT="$ENDPORT"
+  [ -n "$1" ] && __STARTPORT="$1"
+  [ -n "$2" ] && __ENDPORT="$2"
+  for __TARGETPORT in $(seq "$__STARTPORT" "$__ENDPORT")
+  do
+    echo "Starting node with new peer id at port $__TARGETPORT."
+    local __MAXLOGS=1
+    local __MAXARCHLOGS=0
+    local __RPC_PORT=""
+    [ "$RPC_ENABLE" = "y" ] && __RPC_PORT=$((__TARGETPORT-NODE_BASE_PORT+RPC_BASE_PORT))
+    if [[ $__RPC_PORT -gt 0 ]]; then
+      echo "Starting node with RPC_ENABLE at 127.0.0.1:$__RPC_PORT."
+      snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__TARGETPORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS" "--rpc" "127.0.0.1:$__RPC_PORT"
+    else
+      snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__TARGETPORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS"
+    fi
+    sleep "$WAIT_SECS"
   done
 }
 
@@ -554,7 +580,7 @@ cmdline() {
   done
   eval set -- $args                                 # Reset the positional parameters to the short options
 
-  while getopts "Lecvqw:d:hma:b:niltsrxyzp:" OPTION      # Process options
+  while getopts "SLecvqw:d:hma:b:niltsrxyzp:" OPTION      # Process options
   do
     case $OPTION in
       h) usage;
@@ -589,6 +615,8 @@ cmdline() {
          snnm_terminate_and_restart "$STARTPORT" "$ENDPORT" ;;
       s) COMMAND="y"
          snnm_start "$STARTPORT" "$ENDPORT" ;;
+      S) COMMAND="y"
+         snnm_start_fast "$STARTPORT" "$ENDPORT" ;;
       y) COMMAND="y"
          snnm_archive_dead ;;
       z) COMMAND="y"
@@ -622,11 +650,13 @@ OPTIONS:
 
 COMMANDS:
    -l List nodes
+   -L List nodes with rpc call based details
    -c Update cache for all peer-ids which may take a long time
    -t Terminate nodes (-w option does not apply)
    -r Restart nodes that are not running at original ports
    -x eXchange; terminate and restart nodes at same ports
    -s Start nodes in a port range unless a port already is associated with an existing peer-id
+   -S Start nodes faster by not checking if node and optionally rpc ports are already in use. Starts may cause errors.
 
 COMMANDS with increased risk of breaking things, very much experimental at this time:
    -y archive all dead nodes (ignores any port restricting arguments) - MAY DISRUPT NODE STARTED IN UNSUPPORTED WAYS
