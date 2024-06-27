@@ -3,7 +3,7 @@
 #global variables readonly
 readonly VERSION="0.3.2"
 readonly ARGS=( "$@" )
-OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
+OWNER_DISCORD_ID="drirmbda_73081"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 STARTPORT=50000                           # Default lower end of port range, inclusive
 ENDPORT=65535                             # Default upper end of port range, inclusive
 RPC_BASE_PORT=30000                       # the base is the port ID for the first node started with RPC_ENABLE enabled in a call
@@ -883,13 +883,14 @@ OPTIONS:
 COMMANDS:
    -l List nodes
    -L List nodes with rpc call based details
-   -j Update info cache for all peer-ids which may take a very long time on an overloaded system! This results in most complete info transfer using running nodes.
-   -c Update ports cache without newly pulling information from ps lsof and netstat but using cached output generated with -j
-   -T Terminate nodes fast (-w option does not apply)
+   -t Terminate nodes fast (-w option does not apply)
    -r Restart nodes that are not running at original ports fast
    -x eXchange; terminate and restart nodes at same ports fast
    -s Start nodes in a port range unless a port already is associated with an existing peer-id
-   -S Start nodes fast
+
+COMMANDS for upgrading of nodes created with snnm older than 0.3.0.
+   -j Update info cache for all peer-ids which may take a very long time on an overloaded system! This results in most complete info transfer using running nodes.
+   -c Update ports cache without newly pulling information from ps lsof and netstat but using cached output generated with -j
 
 EXAMPLE:
    $0 -a <lower_port_range_end> -b <upper_port_range_end> -d <discord_id> -w <pause_seconds> -e -S
