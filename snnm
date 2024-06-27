@@ -1,10 +1,10 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.4.0"
+readonly VERSION="0.4.1"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
-AUTHOR="drirmbda_73081"                   ; OWNER_DISCORD_ID="$AUTHOR"
+AUTHOR="drirmbda_73081"                   #; OWNER_DISCORD_ID="$AUTHOR"
 STARTPORT=50000                           # Default lower end of port range, inclusive
 ENDPORT=65535                             # Default upper end of port range, inclusive
 METRIC_BASE_PORT=10000                    # the base is the port ID for the first metrics server
@@ -24,102 +24,6 @@ RPC_ENABLE=""                             # "y" indicates rpc port should be set
 RPC_SUPPORT_CHECK_RESULT=""               # "y" indicates JSON processor jq is available (set automatically in code below)
 
 #if xhost >& /dev/null ; then readonly HAVEDISP="y" ; fi # check if display server is running to replace TUI by GUI
-
-#######################################################################################################################
-# Core functions extracting and caching information about sn nodes
-########################################################################################################################
-
-# usage: get_active_sn_pid <PEER_ID>      # Requires node to be running with a PID
-get_and_store_active_sn_pid() {
-  local __PEER_ID="$1"
-  local __PID=""
-  if [ -f "$NODE_DIR/$__PEER_ID/PID" ]; then
-    __PID=$(cat "$NODE_DIR/$__PEER_ID/PID")
-    if [[ "$__PID" -gt 0 ]]; then         # check if still alive
-      local __PSPID
-      __PSPID=$(ps -A | grep "safenode" | grep -E -o "($__PID) ")
-      if [[ "$__PSPID" -ne "$__PID" ]]; then
-        #__PSPID=$(lsof -X "$NODE_DIR/$__PEER_ID/logs/safenode.log" | grep "safenode " | grep -o "[0-9]*" | head -1)
-        __PSPID=$(lsof -X "$NODE_DIR/$__PEER_ID/logs/safenode.log" | grep "safenode " | grep -o "[0-9]*" | head -1)
-        if [[ "$__PSPID" -gt 0 ]]; then
-          echo "WARNING: PID $__PID in cache was not found running! Actual PID seems to be $__PSPID. Updating cache." >&2
-          __PID="$__PSPID"
-        else
-          echo "WARNING: PID $__PID in cache was not found running! Updating cache (deletion)." >&2
-          __PID=""
-          mv "$NODE_DIR/$__PEER_ID/PID" "$NODE_DIR/$__PEER_ID/STOPPED"
-        fi
-      fi
-    else
-      mv "$NODE_DIR/$__PEER_ID/PID" "$NODE_DIR/$__PEER_ID/STOPPED"
-    fi
-  else
-    if [ -f "$NODE_DIR/$__PEER_ID/logs/safenode.log" ]; then
-      if [[ "$__PID" -le 0 ]]; then
-        __PID=$(lsof -X "$NODE_DIR/$__PEER_ID/logs/safenode.log" | grep "safenode " | grep -o "[0-9]*" | head -1)
-      fi
-    else
-      echo "WARNING: Logfile $NODE_DIR/$__PEER_ID/logs/safenode.log Not Found! Make sure logging is enabled at node start." >&2
-    fi
-  fi
-  if [[ "$__PID" -gt 0 ]]; then
-    echo "$__PID" > "$NODE_DIR/$__PEER_ID/PID"
-    if [ -f "$NODE_DIR/$__PEER_ID/STOPPED" ]; then
-      rm "$NODE_DIR/$__PEER_ID/STOPPED"
-    fi
-    echo "$__PID"
-  else
-    if [ -f "$NODE_DIR/$__PEER_ID/PID" ]; then
-      mv "$NODE_DIR/$__PEER_ID/PID" "$NODE_DIR/$__PEER_ID/STOPPED"
-    else
-      touch "$NODE_DIR/$__PEER_ID/STOPPED"
-    fi
-  fi
-}
-
-# usage: get_and_store_sn_port <PEER_ID>      # Requires node to be running with a PID or nothing will be returned
-# can be slow executing due to the use of netstat. A side effect is get_and_store of pid if sn node is active.
-get_and_store_sn_port(){
-  local __PEER_ID="$1"
-  local __PID
-  local __PORT
-  __PID=$(get_and_store_active_sn_pid "$__PEER_ID")
-  if [[ "$__PID" -gt 0 ]]; then
-    __PORT=$(netstat -lnup 2> /dev/null | grep "$__PID/safenode" | grep -o "[0-9]*" | head -7 | tail -n1)
-    if [[ "$__PORT" -gt 0 ]]; then
-      echo "$__PORT" > "$NODE_DIR/$__PEER_ID/PORT"
-      echo "$__PORT"
-    fi
-  fi
-}
-
-# usage: get_sn_pid <PEER_ID>         # Returns pid including check if still active,or tries to get it of a new active sn
-get_sn_pid() {
-  local __PEER_ID="$1"
-  local __PID=""
-  if [ ! -f "$NODE_DIR/$__PEER_ID/PID" ]; then
-    if [ ! -f "$NODE_DIR/$__PEER_ID/STOPPED" ]; then
-      get_and_store_active_sn_pid "$__PEER_ID"
-    fi
-  else
-    if [ -f "$NODE_DIR/$__PEER_ID/STOPPED" ]; then
-      get_and_store_active_sn_pid "$__PEER_ID"
-    fi
-  fi
-  if [ -f "$NODE_DIR/$__PEER_ID/PID" ]; then
-    __PID=$(cat "$NODE_DIR/$__PEER_ID/PID")
-    echo "$__PID"
-  fi
-}
-
-# usage: get_sn_port <PEER_ID>              # If stored previously return port, else try to find it from a running node.
-get_sn_port() {
-  local __PEER_ID="$1"
-  local __PORT=""
-  [ ! -f "$NODE_DIR/$__PEER_ID/PORT" ] && __PORT=$(get_and_store_sn_port "$__PEER_ID")
-  [ -f "$NODE_DIR/$__PEER_ID/PORT" ] && __PORT=$(cat "$NODE_DIR/$__PEER_ID/PORT")
-  echo "$__PORT"
-}
 
 ########################################################################################################################
 # METRICS server support
@@ -219,6 +123,10 @@ get_sn_metrics_selection(){
   cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_networking_store_cost"
   cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_networking_process_cpu_usage_percentage"
 }
+
+########################################################################################################################
+# Formatting help
+########################################################################################################################
 
 pretty_uptime() {
   local S="$1"
