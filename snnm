@@ -1,11 +1,13 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.3.2"
+readonly VERSION="0.4.0"
 readonly ARGS=( "$@" )
-OWNER_DISCORD_ID="drirmbda_73081"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
+OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
+AUTHOR="drirmbda_73081"                   ; OWNER_DISCORD_ID="$AUTHOR"
 STARTPORT=50000                           # Default lower end of port range, inclusive
 ENDPORT=65535                             # Default upper end of port range, inclusive
+METRIC_BASE_PORT=10000                    # the base is the port ID for the first metrics server
 RPC_BASE_PORT=30000                       # the base is the port ID for the first node started with RPC_ENABLE enabled in a call
 NODE_BASE_PORT=50000                      # the RPC_PORT becomes node port - NODE_BASE_PORT + RPC_BASE_PORT
 WAIT_SECS=10                              # Default wait between new node starts
@@ -120,6 +122,22 @@ get_sn_port() {
 }
 
 ########################################################################################################################
+# METRICS server support
+########################################################################################################################
+
+get_metrics_from_httpport(){
+  local __PORT="$1"
+  wget -q http://127.0.0.1:"$__PORT"/metrics -O "/tmp/safemetrics-$__PORT"  # @@TODO consider -T timeout secs
+}
+
+cat_metrics_by_httpport(){
+  local __PORT="$1"
+  [ -f "/tmp/safemetrics-$__PORT" ] && cat "/tmp/safemetrics-$__PORT"
+}
+
+#grep network_size, sn_node_put_record, sn_node_peer_added_to_routing_table_total, sn_node_peer_added_to_routing_table_total, sn_node_peer_added_to_routing_table_total
+
+########################################################################################################################
 # RPC support
 ########################################################################################################################
 
@@ -177,6 +195,34 @@ get_sn_rpc_dump(){
     __RESPONSE=$(grpcurl -plaintext -import-path "$RPC_PROTO_PATH" -proto "safenode.proto" -proto "req_resp_types.proto" "$__RPC_ADDRESS" "safenode_proto.SafeNode/$__RPC_CALL" | jq . )
     echo "$__RESPONSE"
   fi
+}
+
+get_sn_metrics_selection(){
+  local __METRICS_PORT=$1
+  get_metrics_from_httpport "$__METRICS_PORT"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_networking_estimated_network_size"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_node_put_record_ok_total"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_node_put_record_err_total"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_node_replication_keys_to_fetch_sum"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_node_replication_keys_to_fetch_count"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_node_peer_added_to_routing_table_total"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_node_peer_removed_from_routing_table_total"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_node_current_reward_wallet_balance"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_node_total_forwarded_rewards"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^libp2p_kad_query_result_duration_seconds_sum"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^libp2p_kad_query_result_duration_seconds_count"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^libp2p_swarm_connections_incoming_total"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^libp2p_swarm_connections_incoming_error_total"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^libp2p_swarm_connections_established_total"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_networking_records_stored"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_networking_store_cost"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_networking_store_cost"
+  cat_metrics_by_httpport "$__METRICS_PORT" | grep -P "^sn_networking_process_cpu_usage_percentage"
+}
+
+pretty_uptime() {
+  local S="$1"
+  [ -n "$S" ] && printf '%03dd:%02dh:%02dm:%02ds\n' $((S/86400)) $((S%86400/3600)) $((S%3600/60)) $((S%60))
 }
 
 ########################################################################################################################
@@ -265,7 +311,8 @@ get_peernodedir_from_pid(){
 get_peernodedir_from_terminal(){
   local __TMPFILE="$1"
   # shellcheck disable=SC2002
-  cat "$__TMPFILE" | grep -oP "(?<=PeerId is )[^ ]*"  # alternative is "(?<=--peer-id=)[^\`]*"
+  cat "$__TMPFILE" | grep -oP "(?<=/node/)[^/]*"    #node path dependent grep! But fast because path is printed immediately to stdout at launch
+  #cat "$__TMPFILE" | grep -oP "(?<=PeerId is )[^ ]*"  # alternative is "(?<=--peer-id=)[^\`]*"
 }
 
 set_cached_argsline(){
@@ -312,10 +359,26 @@ get_cached_rpc() {
   [ -f "$NODE_DIR/$__PEER_ID/RPC" ] && cat "$NODE_DIR/$__PEER_ID/RPC"
 }
 
+set_cached_metricsport(){
+  local __PEER_ID="$1"
+  local __METRICS="$2"
+  echo "$__METRICS" > "$NODE_DIR/$__PEER_ID/METRICS"
+}
+
+get_cached_metricsport() {
+  local __PEER_ID="$1"
+  [ -f "$NODE_DIR/$__PEER_ID/METRICS" ] && cat "$NODE_DIR/$__PEER_ID/METRICS"
+}
+
 set_cached_owner(){
   local __PEER_ID="$1"
   local __OWNER="$2"
   echo "$__OWNER" > "$NODE_DIR/$__PEER_ID/OWNER"
+}
+
+get_cached_owner(){
+  local __PEER_ID="$1"
+  [ -f "$NODE_DIR/$__PEER_ID/OWNER" ] && cat "$NODE_DIR/$__PEER_ID/OWNER"
 }
 
 ########################################################################################################################
@@ -325,8 +388,8 @@ set_cached_owner(){
 #usage example: A=$(is_occupied_udp <port>) ; [[ $A -gt 0 ]]  && echo "yes it is!"
 is_occupied_udp(){
   local __PORT="$1"
-  timeout 0.1 nc -l -u -p "$__PORT" > /dev/null 2>&1
-  if [ "$?" -lt 124 ]; then
+  timeout --preserve-status 0.1 nc -l -u -p "$__PORT" > /dev/null 2>&1
+  if [ "$?" -lt 143 ]; then
     echo "1" #occupied
   else
     echo "0"
@@ -335,8 +398,8 @@ is_occupied_udp(){
 
 is_occupied_tcp(){
   local __PORT="$1"
-  timeout 0.1 nc -l -t -p "$__PORT" > /dev/null 2>&1
-  if [ "$?" -lt 124 ]; then
+  timeout --preserve-status 0.1 nc -l -t -p "$__PORT" > /dev/null 2>&1
+  if [ "$?" -lt 143 ]; then
     echo "1" #occupied
   else
     echo "0"
@@ -372,11 +435,13 @@ snnm_node_starter() {
   local __OWNER_FLAG="--owner"
   local __PORT_FLAG="--port"
   local __RPC_FLAG="--rpc"
+  local __METRIC_FLAG="--metrics-server-port"
   local __PEER_ID_FLAG="--peer_id"
   local __MAXLOGS_FLAG="--max_log_files"
   local __MAXARCHLOGS_FLAG="--max_archived_log_files"
   local __PORT=""
   local __RPC=""
+  local __METRIC=""
   local __OWNER=""
   local ARGSLINE=""
   while [ "$#" -gt 1 ]; do
@@ -391,6 +456,8 @@ snnm_node_starter() {
                           __PORT=$2 ;;
       "$__RPC_FLAG")      ARGSLINE="$ARGSLINE $__RPC_FLAG $2"
                           __RPC=$2 ;;
+      "$__METRIC_FLAG")   ARGSLINE="$ARGSLINE $__METRIC_FLAG $2"
+                          __METRIC=$2 ;;
       "$__PEER_ID_FLAG")  ARGSLINE="$ARGSLINE --root-dir $NODE_DIR/$2"
                           ARGSLINE="$ARGSLINE --log-output-dest $NODE_DIR/$2/logs" ;;
       "$__MAXLOGS_FLAG")  ARGSLINE="$ARGSLINE $__MAXLOGS_FLAG=$2" ;;
@@ -407,14 +474,17 @@ snnm_node_starter() {
   local __PID
   eval "$SAFENODEPATH $ARGSLINE > /tmp/safenodeout-$__PORT & disown"
   __PID="$!"        #get the pid of the safenode. This must directly follow eval command to capture the correct pid
-  sleep 1 #if this does not work then monitor file creation with a timeout.
-  cat "/tmp/safenodeout-$__PORT"
+  sleep 1
   local __PEER_ID=""
   #__PEER_ID=$(get_peernodedir_from_pid "$__PID")
-  local __PEER_ID_TERMINAL
-  __PEER_ID_TERMINAL=$(get_peernodedir_from_terminal "/tmp/safenodeout-$__PORT")
-  [ -z "$__PEER_ID" ] && __PEER_ID="$__PEER_ID_TERMINAL"
-  [ -z "$__PEER_ID" ] && echo "FATAL: For port $__PORT failed to extract PEER_ID from pid $__PID or terminal output file $__PEER_ID_TERMINAL" && exit 1
+  timeout 1 tail -f "/tmp/safenodeout-$__PORT"
+  if [ -z "$__PEER_ID" ]; then
+    sleep 2 #if this does not work then monitor file creation with a timeout.
+    local __PEER_ID_TERMINAL
+    __PEER_ID_TERMINAL=$(get_peernodedir_from_terminal "/tmp/safenodeout-$__PORT")
+    [ -n "$__PEER_ID_TERMINAL" ] && __PEER_ID="$__PEER_ID_TERMINAL"
+  fi
+  [ -z "$__PEER_ID" ] && echo "FATAL: For port $__PORT failed to extract PEER_ID for pid $__PID from port $__PORT, nor from terminal output file $__PEER_ID_TERMINAL" && exit 1
   if [ -d "$NODE_DIR/$__PEER_ID" ]; then
     set_cached_argsline "$__PEER_ID" "$ARGSLINE"
     set_cached_pid "$__PEER_ID" "$__PID"
@@ -516,7 +586,7 @@ snnm_pullin_legacy_stopped_nodes(){
 ########################################################################################################################
 
 #usage: snnm_list <optional start of port range overriding STARTPORT> <optional end of port range overriding ENDPORT>
-# global NODE_DIR must be set
+# global NODE_DIR must be set ; This function is being deprecated
 snnm_list() {
   local __STARTPORT="$STARTPORT"
   local __ENDPORT="$ENDPORT"
@@ -533,53 +603,49 @@ snnm_list() {
   for __PEER_ID in ${__PEER_ID_LIST[@]}
   do
     if [ -n "$__PEER_ID" ]; then
-      [ -n "$RPC_SHOW" ] && echo -n "."
+      echo -n "."
       local __PORT
-      __PORT=$(get_sn_port "$__PEER_ID")
+      __PORT=$(get_cached_port "$__PEER_ID")
       if [[ $__PORT -le $__ENDPORT && $__PORT -ge $__STARTPORT ]]; then
         local __PID
-        __PID=$(get_sn_pid "$__PEER_ID")
-        local __RPC_INFO=""
-        if [[ "$__PID" -gt 0 && -n "$RPC_SHOW" && -n "$RPC_SUPPORT_CHECK_RESULT" ]]; then
-          local __RPC_ADDRESS
-          __RPC_ADDRESS=$(get_sn_rpc_address_for_pid "$__PID" "$__PEER_ID")
-          if [[ -n "$__RPC_ADDRESS" ]]; then
-            local __RPC_JSON
-            __RPC_JSON=$(get_sn_rpc_nodeinfo "$__RPC_ADDRESS" "NodeInfo" )
-            local __RPC_BIN
-            __RPC_BIN=$(echo "$__RPC_JSON" | jq -M .binVersion? )
-            local __RPC_UPTIME
-            __RPC_UPTIME=$(echo "$__RPC_JSON" | jq -M .uptimeSecs? )
-            __RPC_JSON=$(get_sn_rpc_nodeinfo "$__RPC_ADDRESS" "NetworkInfo" )
-            local __RPC_PEERS
-            __RPC_PEERS=$(echo "$__RPC_JSON" | jq -M .connectedPeers[]? | wc -l )
-            __PEERS_TOTAL=$((__PEERS_TOTAL+__RPC_PEERS))
-            __RPC_JSON=$(get_sn_rpc_nodeinfo "$__RPC_ADDRESS" "RecordAddresses" )
-            local __RPC_RECORDS
-            __RPC_RECORDS=$(echo "$__RPC_JSON" | jq -M .addresses[]? | wc -l )
-            __RECORDS_TOTAL=$((__RECORDS_TOTAL+__RPC_RECORDS))
-            __RPC_INFO=$(printf "v.%-10s | %6s peers | %6s records | %10ss uptime | " "$__RPC_BIN" "$__RPC_PEERS" "$__RPC_RECORDS" "$__RPC_UPTIME")
-          fi
-        fi
+        __PID=$(get_cached_pid "$__PEER_ID")
+        local __RPC
+        __RPC=$(get_cached_rpc "$__PEER_ID")
+
+        local __METRICS
+        __METRICS=$(get_cached_metricsport "$__PEER_ID")
         local __FORWARDED_BALANCE=""
         if [[ -f "$NODE_DIR/$__PEER_ID/forwarded_balance" ]]; then
           __FORWARDED_BALANCE=$(cat "$NODE_DIR/$__PEER_ID/forwarded_balance")
           __FORWARDED_TOTAL=$((__FORWARDED_TOTAL+__FORWARDED_BALANCE))
-          __FORWARDED_BALANCE=$(printf "fwd_nanos: %s" "$__FORWARDED_BALANCE")
+          __FORWARDED_BALANCE=$(printf "fwd_nanos=%s" "$__FORWARDED_BALANCE")
         fi
+        local __PIDSTATE=" "
+        local __PID_LIVE
+        __PID_LIVE=$(get_pid_from_port_commandline "$__PORT")
+        [ -n "$__PID_LIVE" ] && [ "$__PID_LIVE" -gt 0 ] && __PIDSTATE="."
+        local __PORTSTATE=" "
+        local __OCCUPIED
+        __OCCUPIED=$(is_occupied_udp "$__PORT")
+        [ "$__OCCUPIED" -gt 0 ] && __PORTSTATE="."
+        local __RPCSTATE=" "
+        __RPC=$(echo "$__RPC" | grep -oG "[0-9]*" | tail -1)
+        __OCCUPIED=$(is_occupied_tcp "$__RPC")
+        [ "$__OCCUPIED" -gt 0 ] && __RPCSTATE="."
+        local __METRICSTATE=" "
+        __OCCUPIED=$(is_occupied_tcp "$__METRICS")
+        [ "$__OCCUPIED" -gt 0 ] &&  __METRICSTATE="."
         local __ITEM
-        __ITEM=$(printf "| port %6s | pid %8s | peer-id %s | %s$__FORWARDED_BALANCE\n" "$__PORT" "$__PID" "$__PEER_ID" "$__RPC_INFO")
+        __ITEM=$(printf "%1sudp=%6s %1srpc=%6s %1shttp=%6s %1spid=%8s peer-id=%s $__FORWARDED_BALANCE\n" "$__PORTSTATE" "$__PORT" "$__RPCSTATE" "$__RPC" "$__METRICSTATE" "$__METRICS" "$__PIDSTATE" "$__PID" "$__PEER_ID" )
         __ITEMS_LIST+=( "$__ITEM" )
       fi
     fi
   done
-  [ -n "$RPC_SHOW" ] && echo ""
+  echo ""
   local __ITEMS_SORTED=()
   IFS=$'\n' __ITEMS_SORTED=($(sort <<<"${__ITEMS_LIST[*]}")); unset IFS
   printf  '%s\n' "${__ITEMS_SORTED[@]}"
-  [ -n "$RPC_SHOW" ] && echo "Total connected peers (for nodes with rpc port only): $__PEERS_TOTAL"
-  [ -n "$RPC_SHOW" ] && echo "Total records (for nodes with rpc port only): $__RECORDS_TOTAL"
-  [ -n "$RPC_SHOW" ] && echo "Total forwarded nanos: $__FORWARDED_TOTAL"
+  echo "Total forwarded nanos: $__FORWARDED_TOTAL"
 }
 
 snnm_list_fast() { #OPTION -l assumes cache is synced to machine state
@@ -592,9 +658,10 @@ snnm_list_fast() { #OPTION -l assumes cache is synced to machine state
   local __FORWARDED_TOTAL="0"
   local __RECORDS_TOTAL="0"
   local __ITEMS_LIST=() #items collector before sorting
+  local __MISSINGCHACHEDPID
   for __PORT in $(seq "$__STARTPORT" 1 "$__ENDPORT" )
   do
-   # [ -n "$RPC_SHOW" ] && echo -n "."
+    local __CACHED_OWNER=""
     if [ -d "$SNNM_BYPORT_DIR/$__PORT" ]; then
       local __PATH
       __PATH=$(realpath "$SNNM_BYPORT_DIR/$__PORT") #follow symlink
@@ -606,6 +673,7 @@ snnm_list_fast() { #OPTION -l assumes cache is synced to machine state
         local __PID_LIVE
         __PID_LIVE=$(get_pid_from_peerid_commandline "$__PEER_ID")
         [[ "$__PID" -ne "$__PID_LIVE" ]] && set_cached_pid "$__PEER_ID" "$__PID_LIVE" && __PID="$__PID_LIVE"
+        [[ -z "$__PID" ]] && __MISSINGCHACHEDPID="Y"
         local __RPC_INFO=""
         if [[ "$__PID" -gt 0 && -n "$RPC_SHOW" && -n "$RPC_SUPPORT_CHECK_RESULT" ]]; then
           local __RPC_ADDRESS
@@ -614,9 +682,10 @@ snnm_list_fast() { #OPTION -l assumes cache is synced to machine state
             local __RPC_JSON
             __RPC_JSON=$(get_sn_rpc_nodeinfo "$__RPC_ADDRESS" "NodeInfo" )
             local __RPC_BIN
-            __RPC_BIN=$(echo "$__RPC_JSON" | jq -M .binVersion? )
+            __RPC_BIN=$(echo "$__RPC_JSON" | jq -M .binVersion? | tr -d '"' )
             local __RPC_UPTIME
-            __RPC_UPTIME=$(echo "$__RPC_JSON" | jq -M .uptimeSecs? )
+            __RPC_UPTIME=$(echo "$__RPC_JSON" | jq -M .uptimeSecs? | tr -d '"' )
+            __RPC_UPTIME=$(pretty_uptime "$__RPC_UPTIME")
             __RPC_JSON=$(get_sn_rpc_nodeinfo "$__RPC_ADDRESS" "NetworkInfo" )
             local __RPC_PEERS
             __RPC_PEERS=$(echo "$__RPC_JSON" | jq -M .connectedPeers[]? | wc -l )
@@ -625,19 +694,36 @@ snnm_list_fast() { #OPTION -l assumes cache is synced to machine state
             local __RPC_RECORDS
             __RPC_RECORDS=$(echo "$__RPC_JSON" | jq -M .addresses[]? | wc -l )
             __RECORDS_TOTAL=$((__RECORDS_TOTAL+__RPC_RECORDS))
-            __RPC_INFO=$(printf "v.%-10s | %6s peers | %6s records | %10ss uptime | " "$__RPC_BIN" "$__RPC_PEERS" "$__RPC_RECORDS" "$__RPC_UPTIME")
+            __RPC_INFO=$(printf "v.%-9s %4s peers %5s records %17s uptime  " "$__RPC_BIN" "$__RPC_PEERS" "$__RPC_RECORDS" "$__RPC_UPTIME")
           fi
         fi
+        [[ "$__PID" -gt 0 ]] && __CACHED_OWNER=$(get_cached_owner "$__PEER_ID")
         local __FORWARDED_BALANCE=""
         if [[ -f "$NODE_DIR/$__PEER_ID/forwarded_balance" ]]; then
           __FORWARDED_BALANCE=$(cat "$NODE_DIR/$__PEER_ID/forwarded_balance")
           __FORWARDED_TOTAL=$((__FORWARDED_TOTAL+__FORWARDED_BALANCE))
           __FORWARDED_BALANCE=$(printf "fwd_nanos: %s" "$__FORWARDED_BALANCE")
         fi
+        local __PID_RUNNING
+        local __PID_MARK
+        local __PORT_OCCUPIED
+        __PORT_OCCUPIED=$(is_occupied_udp "$__PORT")
+        if [[ "$__PORT_OCCUPIED" -gt 0 ]]; then
+          __PORT_OCCUPIED=" " #occupied
+          if [[ ! "$__PID" -gt 0 ]]; then
+            __PID_RUNNING=$(get_pid_from_port_commandline "$__PORT")
+            if [[ $__PID_RUNNING -gt 0 ]]; then
+              __PID="$__PID_RUNNING"
+              __PID_MARK="."
+            fi
+          fi
+        else
+          __PORT_OCCUPIED="-"
+        fi
         local __ITEM
-        printf "| port %6s | pid %8s | peer-id %s | %s$__FORWARDED_BALANCE\n" "$__PORT" "$__PID" "$__PEER_ID" "$__RPC_INFO"
+        printf "%1sudp %6s %1spid %7s  peer-id %s  %s  %s$__FORWARDED_BALANCE\n" "$__PORT_OCCUPIED" "$__PORT" "$__PID_MARK" "$__PID" "$__PEER_ID" "$__CACHED_OWNER" "$__RPC_INFO"
       else
-        echo "WARNING: Port $__PORT in cache does not point to any node ($__PATH)."
+        echo "WARNING: Port $__PORT in cache does not point to any node with path $__PATH."
       fi
     fi
   done
@@ -645,6 +731,7 @@ snnm_list_fast() { #OPTION -l assumes cache is synced to machine state
  # local __ITEMS_SORTED=()
   #IFS=$'\n' __ITEMS_SORTED=($(sort <<<"${__ITEMS_LIST[*]}")); unset IFS
  # printf  '%s\n' "${__ITEMS_SORTED[@]}"
+  [ -n "$__MISSINGCHACHEDPID" ] && echo "WARNING: Nodes marked with . before pid did not have their PID cached. Fix with -j and -c."
   [ -n "$RPC_SHOW" ] && echo "Total connected peers (for nodes with rpc port only): $__PEERS_TOTAL"
   [ -n "$RPC_SHOW" ] && echo "Total records (for nodes with rpc port only): $__RECORDS_TOTAL"
   echo "Total forwarded nanos: $__FORWARDED_TOTAL"
@@ -720,15 +807,19 @@ snnm_restart_fast(){
             local __MAXLOGS="1"
             local __MAXARCHLOGS="0"
             local __RPC_PORT=""
+            local __METRIC_PORT
             [ "$RPC_ENABLE" = "y" ] && __RPC_PORT=$((__PORT-NODE_BASE_PORT+RPC_BASE_PORT))
+            [ "$RPC_ENABLE" = "y" ] && __METRIC_PORT=$((__PORT-NODE_BASE_PORT+METRIC_BASE_PORT))
             if [[ $__RPC_PORT -gt 0 ]]; then
               local __RPC_OCCUPIED
               __RPC_OCCUPIED=$(is_occupied_tcp "$__RPC_PORT")
+              local __METRIC_OCCUPIED
+              __METRIC_OCCUPIED=$(is_occupied_tcp "$__METRIC_PORT")
               if [ "$__RPC_OCCUPIED" -gt 0 ]; then
                 echo "Starting port $__TARGETPORT without RPC at $__RPC_PORT - it is already occupied."
                 snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__PORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS" "--peer_id" "$__PEER_ID"
               else
-                snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__PORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS" "--peer_id" "$__PEER_ID" "--rpc" "127.0.0.1:$__RPC_PORT"
+                snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__PORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS" "--peer_id" "$__PEER_ID" "--rpc" "127.0.0.1:$__RPC_PORT" "--metrics-server-port" "$__METRIC_PORT"
               fi
             else
               snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__PORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS" "--peer_id" "$__PEER_ID"
@@ -775,15 +866,19 @@ snnm_start_fast(){
       local __MAXLOGS=1
       local __MAXARCHLOGS=0
       local __RPC_PORT=""
+      local __METRIC_PORT
       [ "$RPC_ENABLE" = "y" ] && __RPC_PORT=$((__TARGETPORT-NODE_BASE_PORT+RPC_BASE_PORT))
+      [ "$RPC_ENABLE" = "y" ] && __METRIC_PORT=$((__PORT-NODE_BASE_PORT+METRIC_BASE_PORT))
       if [[ $__RPC_PORT -gt 0 ]]; then
         local __RPC_OCCUPIED
         __RPC_OCCUPIED=$(is_occupied_tcp "$__RPC_PORT")
+        local __METRIC_OCCUPIED
+        __METRIC_OCCUPIED=$(is_occupied_tcp "$__METRIC_PORT")
         if [ "$__RPC_OCCUPIED" -gt 0 ]; then
           echo "Starting port $__TARGETPORT without RPC at $__RPC_PORT - it is already occupied."
           snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__TARGETPORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS"
         else
-          snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__TARGETPORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS" "--rpc" "127.0.0.1:$__RPC_PORT"
+          snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__TARGETPORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS" "--rpc" "127.0.0.1:$__RPC_PORT" "--metrics-server-port" "$__METRIC_PORT"
         fi
       else
         snnm_node_starter "--owner" "$__DISCORD_ID" "--port" "$__TARGETPORT" "--max_log_files" "$__MAXLOGS" "--max_archived_log_files" "$__MAXARCHLOGS"
@@ -835,10 +930,7 @@ cmdline() {
          local RPC_SHOW="y"
          snnm_list_fast "$STARTPORT" "$ENDPORT" ;;
       k) COMMAND="y"
-         snnm_list "$STARTPORT" "$ENDPORT" ;;   # Deprecated, old -l
-      K) COMMAND="y"
-         local RPC_SHOW="y"
-         snnm_list "$STARTPORT" "$ENDPORT" ;;   # Deprecated, old -L
+         snnm_list "$STARTPORT" "$ENDPORT" ;;
       j) COMMAND="y"
          update_netstat
          update_lsof ;;
@@ -881,8 +973,9 @@ OPTIONS:
    -i interactive mode, must precede the command switches it will apply to
 
 COMMANDS:
-   -l List nodes
-   -L List nodes with rpc call based details
+   -k List nodes using the nodes directories directly, for debugging and checking udp and tcp ports of nodes. Can be slow.
+   -l List nodes registered by snnm by port number
+   -L List nodes registered by snnm by port number with rpc call based details
    -t Terminate nodes fast (-w option does not apply)
    -r Restart nodes that are not running at original ports fast
    -x eXchange; terminate and restart nodes at same ports fast
