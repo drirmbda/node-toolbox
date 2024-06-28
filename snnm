@@ -1,19 +1,19 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.4.1"
+readonly VERSION="0.4.3"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 AUTHOR="drirmbda_73081"                   #; OWNER_DISCORD_ID="$AUTHOR"
-STARTPORT=50000                           # Default lower end of port range, inclusive
-ENDPORT=65535                             # Default upper end of port range, inclusive
 METRIC_BASE_PORT=10000                    # the base is the port ID for the first metrics server
 RPC_BASE_PORT=30000                       # the base is the port ID for the first node started with RPC_ENABLE enabled in a call
 NODE_BASE_PORT=50000                      # the RPC_PORT becomes node port - NODE_BASE_PORT + RPC_BASE_PORT
+STARTPORT="$NODE_BASE_PORT"               # Default lower end of port range, inclusive
+ENDPORT=65535                             # Default upper end of port range, inclusive
 WAIT_SECS=10                              # Default wait between new node starts
 SAFENODEPATH="$HOME/.local/bin/safenode"  # Default safenode binary, full path
 NODE_DIR="$HOME/.local/share/safe/node"   # Default location of peer_id directories
-SNNM_DIR="$NODE_DIR/../snnm"              # location for snnm cache
+SNNM_DIR="$NODE_DIR/../snnm"              # location for snnm files, other than those stored within each node directory
 SNNM_BYPORT_DIR="$SNNM_DIR/by-port"       # location for snnm by-port links
 SNNM_BYPEER_DIR="$SNNM_DIR/by-peerid"     # location for snnm by-port links
 NODE_MANAGER=""                           # "y" indicates selection of safenode-manager use-case, not the default
@@ -44,31 +44,6 @@ cat_metrics_by_httpport(){
 ########################################################################################################################
 # RPC support
 ########################################################################################################################
-
-#usage: get_sn_rpc_address_for_pid <pid> <peer id>
-get_sn_rpc_address_for_pid(){
-  local __RPC_ADDRESS
-  local __PID="$1"
-  local __PEER_ID="$2"
-  if [[ ! -f "$NODE_DIR/$__PEER_ID/RPCPORT" ]]; then
-    __RPC_ADDRESS=$(netstat -tnlp 2> /dev/null | grep " $__PID/safenode " | grep -E -o "127.0.0.1:([0-9]*)")
-    echo "$__RPC_ADDRESS" > "$NODE_DIR/$__PEER_ID/RPCPORT"
-  else
-    __RPC_ADDRESS=$(cat "$NODE_DIR/$__PEER_ID/RPCPORT");
-    local __RESPONSE
-    if [[ -n "$__RPC_ADDRESS" ]]; then
-      __RESPONSE=$(grpcurl -plaintext -import-path "$RPC_PROTO_PATH" -proto "safenode.proto" -proto "req_resp_types.proto" "$__RPC_ADDRESS" "safenode_proto.SafeNode/NodeInfo")
-      if [[ -z "$__RESPONSE" ]]; then
-        rm "$NODE_DIR/$__PEER_ID/RPCPORT"
-        __RPC_ADDRESS=""
-      fi
-    else
-      __RPC_ADDRESS=$(netstat -tnlp 2> /dev/null | grep " $__PID/safenode " | grep -E -o "127.0.0.1:([0-9]*)")
-      echo "$__RPC_ADDRESS" > "$NODE_DIR/$__PEER_ID/RPCPORT"
-    fi
-  fi
-  [[ -n "$__RPC_ADDRESS" ]] && echo "$__RPC_ADDRESS"
-}
 
 #usage: get_sn_rpc_info <rpc_address> <rpc_call> where <rpc_call> must be something like NodeInfo or NetworkInfo
 get_sn_rpc_nodeinfo(){
@@ -374,7 +349,7 @@ snnm_node_starter() {
     esac
     shift 2   #move $1 and $2 on to point to next args pair
   done
-  echo "Target port: $__PORT RPC: $__RPC (interactive mode:$INTERACTIVE)..."
+  echo "Target port: $__PORT RPC: $__RPC METRICS: $__METRIC OWNER: $__OWNER Interactive:$INTERACTIVE..."
   if [ "$INTERACTIVE" = "y" ]; then
     ARGSLINE=$(whiptail --title "Node Toolbox" --inputbox "Edit arguments: " 10 80 "$ARGSLINE" 3>&1 1>&2 2>&3 )
   fi
@@ -401,6 +376,7 @@ snnm_node_starter() {
     set_cached_peerid "$__PEER_ID"
     symlink_cache_bypeerid_to_peernodedir "$NODE_DIR/$__PEER_ID" "$__PEER_ID"
     set_cached_rpc "$__PEER_ID" "$__RPC"
+    set_cached_metricsport "$__PEER_ID" "$__METRIC"
     set_cached_owner "$__PEER_ID" "$__OWNER"
   else
     echo "WARNING: logging directory expected for peerid $__PEER_ID not found."
@@ -629,7 +605,7 @@ snnm_list_fast() { #OPTION -l assumes cache is synced to machine state
           __PORT_OCCUPIED="-"
         fi
         local __ITEM
-        printf "%1sudp %6s %1spid %7s  peer-id %s  %s  %s$__FORWARDED_BALANCE\n" "$__PORT_OCCUPIED" "$__PORT" "$__PID_MARK" "$__PID" "$__PEER_ID" "$__CACHED_OWNER" "$__RPC_INFO"
+        printf "%1sudp %6s %1spid %7s  peer-id %52s  %s  %s$__FORWARDED_BALANCE\n" "$__PORT_OCCUPIED" "$__PORT" "$__PID_MARK" "$__PID" "$__PEER_ID" "$__CACHED_OWNER" "$__RPC_INFO"
       else
         echo "WARNING: Port $__PORT in cache does not point to any node with path $__PATH."
       fi
@@ -776,7 +752,7 @@ snnm_start_fast(){
       local __RPC_PORT=""
       local __METRIC_PORT
       [ "$RPC_ENABLE" = "y" ] && __RPC_PORT=$((__TARGETPORT-NODE_BASE_PORT+RPC_BASE_PORT))
-      [ "$RPC_ENABLE" = "y" ] && __METRIC_PORT=$((__PORT-NODE_BASE_PORT+METRIC_BASE_PORT))
+      [ "$RPC_ENABLE" = "y" ] && __METRIC_PORT=$((__TARGETPORT-NODE_BASE_PORT+METRIC_BASE_PORT))
       if [[ $__RPC_PORT -gt 0 ]]; then
         local __RPC_OCCUPIED
         __RPC_OCCUPIED=$(is_occupied_tcp "$__RPC_PORT")
@@ -805,15 +781,15 @@ cmdline() {
   for arg
   do
     local delim=""
-    case "$arg" in                                  # Translate --gnu-long-options to -g (short options)
+    case "$arg" in                                    # Translate --gnu-long-options to -g (short options)
       --help)           args="${args}-h ";;
-      *) [[ "${arg:0:1}" == "-" ]] || delim="\""    # Pass through anything else
+      *) [[ "${arg:0:1}" == "-" ]] || delim="\""      # Pass through anything else
         args="${args}${delim}${arg}${delim} ";;
     esac
   done
-  eval set -- $args                                 # Reset the positional parameters to the short options
+  eval set -- "$args"                                 # Reset the positional parameters to the short options
 
-  while getopts "sLecjvqKkw:d:hma:b:iltrxp:" OPTION      # Process options
+  while getopts "sLecjvqKkw:d:hma:b:iltrxp:" OPTION   # Process options
   do
     case $OPTION in
       h) usage;
@@ -823,12 +799,28 @@ cmdline() {
       m) NODE_MANAGER="y"
          #NODE_DIR="$NODE_DIR_NODEMGR"
          ;;
-      a) STARTPORT=${OPTARG} ;;
-      b) ENDPORT=${OPTARG} ;;
+      a) STARTPORT=${OPTARG}
+        [ -z "$STARTPORT" ] && echo "FATAL: -a option missing value" && exit 1
+        [ "$STARTPORT" -lt "$NODE_BASE_PORT" ] && echo "FATAL: Starting port number must be >= $NODE_BASE_PORT" && exit 1
+        [ "$STARTPORT" -gt "65535" ] && echo "FATAL: Starting port number must be <= 65535" && exit 1
+         ;;
+      b) ENDPORT=${OPTARG}
+        [ -z "$ENDPORT" ] && echo "FATAL: -b option missing value" && exit 1
+        [ "$ENDPORT" -lt "$NODE_BASE_PORT" ] && echo "FATAL: Ending port number must be >= $NODE_BASE_PORT" && exit 1
+        [ "$ENDPORT" -gt "65535" ] && echo "FATAL: Ending port number must be <= 65535" && exit 1
+         ;;
       p) STARTPORT=${OPTARG}
-         ENDPORT=${OPTARG} ;;
-      d) OWNER_DISCORD_ID=${OPTARG} ;;
-      w) WAIT_SECS=${OPTARG} ;;
+         ENDPORT=${OPTARG}
+        [ -z "$STARTPORT" ] && echo "FATAL: -p option missing value" && exit 1
+        [ "$STARTPORT" -lt "$NODE_BASE_PORT" ] && echo "FATAL: Port number must be >= $NODE_BASE_PORT" && exit 1
+        [ "$STARTPORT" -gt "65535" ] && echo "FATAL: Port number must be <= 65535" && exit 1
+         ;;
+      d) OWNER_DISCORD_ID=${OPTARG}
+        [ -z "$OWNER_DISCORD_ID" ] && echo "FATAL: -d option missing value" && exit 1
+         ;;
+      w) WAIT_SECS=${OPTARG}
+        [ -z "$WAIT_SECS" ] && echo "FATAL: -w option missing value" && exit 1
+         ;;
       i) INTERACTIVE="y" ;;
       e) RPC_ENABLE="y" ;;
       q) set -x ;; #debug only
@@ -843,7 +835,6 @@ cmdline() {
          update_netstat
          update_lsof ;;
       c) COMMAND="y"
-         #snnm_update_cache ;; #legacy
          snnm_pullin_legacy_stopped_nodes
          snnm_pullin_legacy_active_nodes ;;
       t) COMMAND="y"
@@ -864,26 +855,29 @@ cmdline() {
 usage() {
   cat << EOF
 $0 (v.$VERSION) is EXPERIMENTAL, use at your own risk!
-USAGE: $0 [options and commands]
 
-Manage safenode nodes directly
+USAGE: $0 [OPTIONS,COMMANDS]
 
-Options and commands are executed or applied in order of appearance. No command specified refreshes the cache.
+Manage safenode nodes directly. The supported use-case is where udp ports are systematically managed, with
+port-forwarding on the router or gateway enabled. Other node managers such as safenode-manager may interfere with
+port assignment but mixed environments should work in absence of port conflicts.
+
+OPTIONS and COMMANDS are applied or executed in order of appearance and may occur multiple times.
 
 OPTIONS:
    -h this help
-   -p single port number of nodes to operate on
-   -a start port number of nodes to operate on
-   -b end port number of nodes to operate on
-   -d set discord ID to use, or use none to disable, for all node (re)starts
-   -w wait time in seconds between launch of new nodes
-   -e enable RPC on node at (re)start for enhanced functionality. Computed as: PORT-NODE_BASE($NODE_BASE_PORT)+RPC_BASE($RPC_BASE_PORT)
+   -p <port> single port number of nodes to operate on, >= $NODE_BASE_PORT
+   -a <port> start port number of nodes to operate on, >= $NODE_BASE_PORT
+   -b <port> end port number of nodes to operate on, <= 65535
+   -d <id> set discord ID to use, or use none to disable, for all node (re)starts, default is $OWNER_DISCORD_ID
+   -w <seconds> wait time in seconds between launch of new nodes
+   -e enable RPC and metrics server on node. ports start at $NODE_BASE_PORT, rpc at $RPC_BASE_PORT, metrics at $METRIC_BASE_PORT
    -i interactive mode, must precede the command switches it will apply to
 
 COMMANDS:
-   -k List nodes using the nodes directories directly, for debugging and checking udp and tcp ports of nodes. Can be slow.
-   -l List nodes registered by snnm by port number
-   -L List nodes registered by snnm by port number with rpc call based details
+   -k List nodes, scanning nodes directories directly, for debugging and checking udp and tcp ports of nodes. Can be slow.
+   -l List nodes, registered by snnm by port number
+   -L List nodes, registered by snnm by port number with rpc call based details
    -t Terminate nodes fast (-w option does not apply)
    -r Restart nodes that are not running at original ports fast
    -x eXchange; terminate and restart nodes at same ports fast
@@ -893,13 +887,28 @@ COMMANDS for upgrading of nodes created with snnm older than 0.3.0.
    -j Update info cache for all peer-ids which may take a very long time on an overloaded system! This results in most complete info transfer using running nodes.
    -c Update ports cache without newly pulling information from ps lsof and netstat but using cached output generated with -j
 
-EXAMPLE:
-   $0 -a <lower_port_range_end> -b <upper_port_range_end> -d <discord_id> -w <pause_seconds> -e -S
+EXAMPLES:
+   $0 -p $NODE_BASE_PORT -e -s -l
+   $0 -a 65000 -b 65009 -d $AUTHOR -w 360 -e -x
+   $0 -b 65009 -e -t -k -a 65000 -b 65004 -w 60 -r -k
 
 NOTE:
-   For all full functionality to be available install whiptail, grpcurl and jq, and make sure that the
-   .proto files safenode.proto and req_resp_types.proto are placed in $RPC_PROTO_PATH. The files can be downloaded here:
-   https://github.com/maidsafe/safe_network/tree/main/sn_protocol/src/safenode_proto.
+   This program requires safenode binaries to be available to start nodes. This requires installation of the rust
+   programming language and a tool to manage safenode binaries: safeup.
+
+   For all full functionality to be available install whiptail (newt), grpcurl, jq, netstat (net-tools), wget.
+   Make sure that the .proto files safenode.proto and req_resp_types.proto are placed in $RPC_PROTO_PATH.
+   These files are available from: https://github.com/maidsafe/safe_network/tree/main/sn_protocol/src/safenode_proto
+
+   Installation example:
+     sudo dnf -y install newt jq net-tools wget
+     wget https://github.com/fullstorydev/grpcurl/releases/download/v1.9.1/grpcurl_1.9.1_linux_386.rpm
+     sudo rpm -i grpcurl_1.9.1_linux_386.rpm
+     sudo dnf -y install grpcurl jq
+     rm grpcurl_1.9.1_linux_386.rpm
+     cd $RPC_PROTO_PATH
+     wget https://raw.githubusercontent.com/maidsafe/safe_network/main/sn_protocol/src/safenode_proto/safenode.proto -O safenode.proto
+     wget https://raw.githubusercontent.com/maidsafe/safe_network/main/sn_protocol/src/safenode_proto/req_resp_types.proto -O req_resp_types.proto
 
 EOF
 }
@@ -948,7 +957,7 @@ main() {
     exit 1
   fi
   cmdline "$@"        # pre-process cmd line parameters
-  echo "snnm execution is done. In some cases you need to [Ctrl]+[c] to get back to your command prompt."
+  echo "snnm execution completed. You may need to use [Enter] or [Ctrl]+[c] to get command prompt back."
   exit 0
 }
 
