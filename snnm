@@ -1,23 +1,23 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.4.7"
+readonly VERSION="0.4.9"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
-AUTHOR="drirmbda_73081"                   ; OWNER_DISCORD_ID="$AUTHOR"
-METRIC_BASE_PORT=10000                    # the base is the port ID for the first metrics server
-RPC_BASE_PORT=30000                       # the base is the port ID for the first node started with RPC_ENABLE enabled in a call
-NODE_BASE_PORT=50000                      # the RPC_PORT becomes node port - NODE_BASE_PORT + RPC_BASE_PORT
+readonly AUTHOR="drirmbda_73081"          ; OWNER_DISCORD_ID="$AUTHOR"
+readonly METRIC_BASE_PORT=10000           # the base is the port ID for the first metrics server
+readonly RPC_BASE_PORT=30000              # the base is the port ID for the first node started with RPC_ENABLE enabled in a call
+readonly NODE_BASE_PORT=50000             # the RPC_PORT becomes node port - NODE_BASE_PORT + RPC_BASE_PORT
 STARTPORT="$NODE_BASE_PORT"               # Default lower end of port range, inclusive
 RENICE=10                                 # Default renice just after node start. For all: sudo renice -n -10 -p $(pgrep safenode)
 ENDPORT=65535                             # Default upper end of port range, inclusive
 WAIT_SECS=10                              # Default wait between new node starts
+MATCHCONDITION=""                         # Default matching condition for operations
 SAFENODEPATH="$HOME/.local/bin/safenode"  # Default safenode binary, full path
 NODE_DIR="$HOME/.local/share/safe/node"   # Default location of peer_id directories
 SNNM_DIR="$NODE_DIR/../snnm"              # location for snnm files, other than those stored within each node directory
 SNNM_BYPORT_DIR="$SNNM_DIR/by-port"       # location for snnm by-port links
 SNNM_BYPEER_DIR="$SNNM_DIR/by-peerid"     # location for snnm by-port links
-NODE_MANAGER=""                           # "y" indicates selection of safenode-manager use-case, not the default
 INTERACTIVE=""                            # "y" indicates selection of interactive mode with TUI or GUI, not the default
 RPC_PROTO_PATH="$HOME"                    # Default location of .proto files compatible with safenode binary
 RPC_ENABLE=""                             # "y" indicates rpc port should be set at start
@@ -180,6 +180,13 @@ symlink_cache_bypeerid_to_peernodedir(){
   fi
 }
 
+get_peernodedirpath_from_cachedport(){
+  local __PORT="$1"
+  local __PATH=""
+  [ -L "$SNNM_BYPORT_DIR/$__PORT" ] && [ -e "$SNNM_BYPORT_DIR/$__PORT" ] && __PATH=$(realpath "$SNNM_BYPORT_DIR/$__PORT") #follow symlink
+  echo "$__PATH"
+}
+
 get_peernodedir_from_peernodedirpath(){
   local __PATH="$1"
   echo "$__PATH" | grep -oP "(?<=/node/)[^/]*"
@@ -281,6 +288,13 @@ get_cached_version(){
   [ -f "$NODE_DIR/$__PEER_ID/VERSION" ] && cat "$NODE_DIR/$__PEER_ID/VERSION"
 }
 
+get_forwarded_nanos(){
+  local __PEER_ID="$1"
+  local __FORWARDED_BALANCE
+  [[ -f "$NODE_DIR/$__PEER_ID/forwarded_balance" ]] && __FORWARDED_BALANCE=$(cat "$NODE_DIR/$__PEER_ID/forwarded_balance")
+  echo "$__FORWARDED_BALANCE"
+}
+
 ########################################################################################################################
 # Checking of open ports and other features
 ########################################################################################################################
@@ -304,6 +318,13 @@ is_occupied_tcp(){
   else
     echo "0"
   fi
+}
+
+get_receiving_connections_bypid(){
+  local __PID="$1"
+  local __DATA
+  __DATA=$(timeout 0.5 strace -tfp "$__PID" -s 1 --trace=network 2>&1 | grep recv | grep "iov_len=94208")
+  echo "$__DATA" | grep -oP "(?<=sin_addr=inet_addr\\(\")[0-9,.]*" | sort | uniq -c #| wc -l
 }
 
 ########################################################################################################################
@@ -573,6 +594,8 @@ snnm_list_fast() { #OPTION -l or -L assumes cache is synced to machine state
   local __RECORDS_TOTAL="0"
   local __NODES_TOTAL="0"
   local __RUNNING_NODES_TOTAL="0"
+  local __RUNNING_NODE_PROCESSES_TOTAL="0"
+  __RUNNING_NODE_PROCESSES_TOTAL=$(ps -A | grep safnode)
   local __MISSINGCHACHEDPID
   for __PORT in $(seq "$__STARTPORT" 1 "$__ENDPORT" )
   do
@@ -601,6 +624,9 @@ snnm_list_fast() { #OPTION -l or -L assumes cache is synced to machine state
         if [[ "$__PID" -gt 0 && -n "$RPC_SHOW" && -n "$RPC_SUPPORT_CHECK_RESULT" ]]; then
           local __RPC_ADDRESS
           __RPC_ADDRESS=$(get_cached_rpc "$__PEER_ID")
+          local __IS_OCCUPIED
+          __IS_OCCUPIED=$(is_occupied_udp __RPC_ADDRESS)
+          [ "$__IS_OCCUPIED" -eq 0 ] && __RPC_ADDRESS="" #non-existent port, probably used in the past but not after restart
           if [[ -n "$__RPC_ADDRESS" ]]; then
             local __RPC_JSON
             __RPC_JSON=$(get_sn_rpc_nodeinfo "$__RPC_ADDRESS" "NodeInfo" )
@@ -632,6 +658,9 @@ snnm_list_fast() { #OPTION -l or -L assumes cache is synced to machine state
           __FORWARDED_TOTAL=$((__FORWARDED_TOTAL+__FORWARDED_BALANCE))
           __FORWARDED_BALANCE=$(printf "fwd_nanos: %s" "$__FORWARDED_BALANCE")
         fi
+        local __CONNECTIONSNAP=""
+        [[ "$__PID" -gt 0 ]] && __CONNECTIONSNAP=$(get_receiving_connections_bypid "$__PID" | wc -l)
+        [ -n "$__CONNECTIONSNAP" ] && __CONNECTIONSNAP=$(printf "rxips:%4s " "$__CONNECTIONSNAP")
         local __PID_RUNNING
         local __PID_MARK
         local __PORT_OCCUPIED
@@ -651,7 +680,7 @@ snnm_list_fast() { #OPTION -l or -L assumes cache is synced to machine state
           __PORT_OCCUPIED="-" #un occupied
         fi
         local __ITEM
-        printf "%1sudp %6s %1spid %7s  peer-id %52s  %s %s%s$__FORWARDED_BALANCE\n" "$__PORT_OCCUPIED" "$__PORT" "$__PID_MARK" "$__PID" "$__PEER_ID" "$__CACHED_OWNER" "$__VERSION" "$__RPC_INFO"
+        printf "%1sudp %6s %1spid %7s  peer-id %52s  %s %s%s$__CONNECTIONSNAP$__FORWARDED_BALANCE\n" "$__PORT_OCCUPIED" "$__PORT" "$__PID_MARK" "$__PID" "$__PEER_ID" "$__CACHED_OWNER" "$__VERSION" "$__RPC_INFO"
       else
         echo "WARNING: Port $__PORT in cache does not point to any node with path $__PATH."
       fi
@@ -660,7 +689,8 @@ snnm_list_fast() { #OPTION -l or -L assumes cache is synced to machine state
   [ -n "$__MISSINGCHACHEDPID" ] && echo "WARNING: Nodes marked with . before pid did not have their PID cached. If this persist, try to fix with -j and -c."
   [ -n "$RPC_SHOW" ] && echo "Total connected peers (for nodes with rpc port only): $__PEERS_TOTAL"
   [ -n "$RPC_SHOW" ] && echo "Total records (for nodes with rpc port only): $__RECORDS_TOTAL"
-  echo "Total running nodes out of total nodes: $__RUNNING_NODES_TOTAL of $__NODES_TOTAL"
+  echo "Total processes: $__RUNNING_NODE_PROCESSES_TOTAL"
+  echo "Total counted running nodes out of total existing: $__RUNNING_NODES_TOTAL of $__NODES_TOTAL"
   echo "Total forwarded nanos: $__FORWARDED_TOTAL"
 }
 
@@ -678,18 +708,28 @@ snnm_terminate_fast(){
         local __PATH
         __PATH=$(realpath "$SNNM_BYPORT_DIR/$__PORT")
         __PEER_ID=$(get_peernodedir_from_peernodedirpath "$__PATH")
-        local __PID
-        __PID=$(get_pid_from_peerid_commandline "$__PEER_ID")
-        if [[ $__PID -gt 0 ]]; then
-          kill "$__PID" && echo "Killed node with peer id $__PEER_ID and pid $__PID running at port $__PORT."
-          touch "$NODE_DIR/$__PEER_ID/STOPPED"
-        else
-          __PID=$(get_pid_from_port_commandline "$__PORT")
+        local __PREVENT_OPERATION
+        if [ -n "$MATCHCONDITION" ]; then
+          __PREVENT_OPERATION="y" #by default block this operation if a match condition is set
+          if [ -n "$__PEER_ID" ]; then
+            __FORWARDED_NANOS=$(get_forwarded_nanos "$__PEER_ID")
+            [ "$__FORWARDED_NANOS" -le "$MATCHCONDITION" ] && __PREVENT_OPERATION="" #clear block to proceed
+          fi
+        fi
+        if [ -z "$__PREVENT_OPERATION" ]; then
+          local __PID
+          __PID=$(get_pid_from_peerid_commandline "$__PEER_ID")
           if [[ $__PID -gt 0 ]]; then
             kill "$__PID" && echo "Killed node with peer id $__PEER_ID and pid $__PID running at port $__PORT."
             touch "$NODE_DIR/$__PEER_ID/STOPPED"
           else
-            echo "WARNING: $__PEER_ID node already stopped (port $__PORT)." >&2
+            __PID=$(get_pid_from_port_commandline "$__PORT")
+            if [[ $__PID -gt 0 ]]; then
+              kill "$__PID" && echo "Killed node with peer id $__PEER_ID and pid $__PID running at port $__PORT."
+              touch "$NODE_DIR/$__PEER_ID/STOPPED"
+            else
+              echo "WARNING: $__PEER_ID node already stopped (port $__PORT)." >&2
+            fi
           fi
         fi
       fi
@@ -789,6 +829,11 @@ snnm_start_fast(){                                    # -s start a brand new nod
   do
     local __PORT_OCCUPIED
     __PORT_OCCUPIED=$(is_occupied_udp "$__TARGETPORT")
+    local __DIRPATH
+    __DIRPATH=$(get_peernodedirpath_from_cachedport "$__TARGETPORT")
+    local __PEERID
+    [ -n "$__DIRPATH" ] && __PEER_ID=$(get_peernodedir_from_peernodedirpath "$__DIRPATH")
+    [ -n "$__PEER_ID" ] && echo "Port is taken by peer id $__PEER_ID. Use -r restart instead." && __PORT_OCCUPIED="1"
     if [ "$__PORT_OCCUPIED" -gt 0 ]; then
       echo "Skipping port $__TARGETPORT - it is already occupied."
     else
@@ -843,15 +888,14 @@ cmdline() {
   local UPGRADE_VERSION="$LATEST_VERSION"
   echo "Latest safenode binary is version $LATEST_VERSION"
 
-  while getopts "u:sLecjvqKkw:d:hma:b:iltrxp:" OPTION   # Process options
+  while getopts "u:sLecjvqKkw:d:hm:a:b:iltrxp:" OPTION   # Process options
   do
     case $OPTION in
       h) usage;
          exit 1 ;;
       v) echo "Version $VERSION"
          exit 0 ;;
-      m) NODE_MANAGER="y"
-         #NODE_DIR="$NODE_DIR_NODEMGR"
+      m) MATCHCONDITION=${OPTARG}
          ;;
       a) STARTPORT=${OPTARG}
          [ -z "$STARTPORT" ] && echo "FATAL: -a option missing value" && exit 1
@@ -920,6 +964,7 @@ OPTIONS:
    -b <port> end port number of nodes to operate on, <= 65535
    -d <id> set discord ID to use, or use none to disable, for all node (re)starts, default is $OWNER_DISCORD_ID
    -w <seconds> wait time in seconds between launch of new nodes
+   -m <condition> condition for -t operation to proceed: Terminate only if forwarded nanos less or equal provided value.
    -e enable RPC and metrics server on node. ports start at $NODE_BASE_PORT, rpc at $RPC_BASE_PORT, metrics at $METRIC_BASE_PORT
    -i interactive mode, must precede the command switches it will apply to
 
@@ -927,7 +972,7 @@ COMMANDS:
    -k List nodes, scanning nodes directories directly, for debugging and checking udp and tcp ports of nodes. Can be slow.
    -l List nodes, registered by snnm by port number
    -L List nodes, registered by snnm by port number with rpc call based details
-   -t Terminate nodes fast (-w option does not apply)
+   -t Terminate nodes fast (-w option does not apply, -m value applies if set)
    -r Restart nodes that are not running at original ports fast
    -x eXchange; terminate and restart nodes at same ports fast
    -s Start nodes in a port range unless a port already is associated with an existing peer-id
@@ -977,9 +1022,9 @@ command_exists() { if command -v "$1" > /dev/null 2>&1;
 }
 
 environment_check() {
-  ! command_exists "timeout" && echo "TERMINATED: Requires timeout installed" && exit 1   #needed for open port checking
-  ! command_exists "safenode" && echo "TERMINATED: Requires safenode installed" && exit 1
-  ! command_exists "netstat" && echo "TERMINADED: Requires netstat (net-tools) installed" && exit 1
+  ! command_exists "timeout" && echo "FATAL: Requires timeout installed" && exit 1   #needed for open port checking
+  ! command_exists "safenode" && echo "FATAL: Requires safenode installed" && exit 1
+  ! command_exists "netstat" && echo "FATAL: Requires netstat (net-tools) installed" && exit 1
   [ "$INTERACTIVE" = "y" ] && ! command_exists "whiptail" && echo "TERMINATED: Option requires whiptail installed" && exit 1
   [ "$RPC_ENABLE" = "y" ] && ! command_exists "grpcurl" && echo "WARNING: To utilize RPC port on nodes you need grpcurl and .proto files installed"
   [ "$RPC_ENABLE" = "y" ] && command_exists "grpcurl" # check proto files at RPC_PROTO_PATH
@@ -987,31 +1032,31 @@ environment_check() {
   [ "$RPC_ENABLE" = "y" ] && ! command_exists "jq" && echo "WARNING: To utilize RPC related function you need jq installed"  # dnf install -y jq
   #enable functionality based on command availability
   command_exists "grpcurl" && command_exists "jq" && RPC_SUPPORT_CHECK_RESULT="y"
-  [ -n "$RPC_SHOW" ] && [ ! -n "$RPC_SUPPORT_CHECK_RESULT" ] && echo "WARNING: RPC calls not enabled. Ensure grpcurl and jq are both installed."
+  [ -n "$RPC_SHOW" ] && [ -z "$RPC_SUPPORT_CHECK_RESULT" ] && echo "FATAL: RPC calls not enabled. Ensure grpcurl and jq are both installed." && exit 1
   [ "$OWNER_DISCORD_ID" != "none" ] && echo "OWNER_DISCORD_ID is set to $OWNER_DISCORD_ID in the snnm script. To unset it, change it to none."
 }
 
 main() {
-  environment_check   # prerequisites check
-  mkdir -p "$NODE_DIR/"
+  environment_check                                         # prerequisites check
+  mkdir -p "$NODE_DIR/"                                     # default node directory
   if [ ! -d "$NODE_DIR/" ]; then
     echo "Failed creating $NODE_DIR/. Remedy before running snnm."
     exit 1
   fi
-  mkdir -p "$SNNM_DIR/"
+  mkdir -p "$SNNM_DIR/"                                     # snnm global values caching directory
   mkdir -p "$SNNM_BYPORT_DIR/"
   mkdir -p "$SNNM_BYPEER_DIR/"
   if [ ! -d "$SNNM_DIR/" ]; then
     echo "Failed creating $SNNM_DIR/. Remedy before running snnm."
     exit 1
   fi
-  trap 'echo "Exiting..." ; trap 2 ; kill -2 $$' SIGINT
+  trap 'echo "Exiting..." ; trap 2 ; kill -2 $$' SIGINT     # catch control-c keystrokes
   # https://www.cons.org/cracauer/sigint.html says this is the way (kill rather than exit with some code):
   # trap '<some command> ; trap 2 ; kill -2 $$' 1 2 3 13 15  #2=SIGINT 1=SIGHUP, 3=SIGQUIT, 13=SIGPIPE, 15=SIGTERM
-  cmdline "$@"        # pre-process cmd line parameters
+  cmdline "$@"                                              # pre-process cmd line parameters
   echo "snnm execution completed. You may need to use [Enter] or [Ctrl]+[c] to get command prompt back."
   exit 0
 }
 
-# run only if script is not being sourced.
+# run main function only if script is not being sourced.
 [[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"
