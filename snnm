@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.5.0"
+readonly VERSION="0.5.2"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 readonly AUTHOR="drirmbda_73081"          ; OWNER_DISCORD_ID="$AUTHOR"
@@ -755,7 +755,7 @@ snnm_terminate_fast(){
       [ -n "$__PORT" ] && [[ $__PORT -le $__ENDPORT && $__PORT -ge $__STARTPORT ]] && snnm_terminate_singleport "$__PORT"
     done
   else
-    [ -n "$__PORT" ] && snnm_terminate_singleport "$__PORT"
+    snnm_terminate_singleport "$__STARTPORT"
   fi
 }
 
@@ -776,18 +776,17 @@ snnm_terminate_singleport(){
     fi
     if [ -z "$__PREVENT_OPERATION" ]; then
       local __PID
-      __PID=$(get_pid_from_peerid_commandline "$__PEER_ID")
+      __PID=$(get_cached_pid "$__PEER_ID")
+      if [[ -n "$__PID" ]] && ps -e | grep "$__PID" | grep "safenode" ; then
+        : #__PID=$(get_pid_from_port_commandline "$__PORT")       #double-check would be safer but much slower. @@TODO add switch
+      else
+        __PID="0"
+      fi
       if [[ $__PID -gt 0 ]]; then
         kill "$__PID" && echo "Killed node with peer id $__PEER_ID and pid $__PID running at port $__PORT."
         touch "$NODE_DIR/$__PEER_ID/STOPPED"
       else
-        __PID=$(get_pid_from_port_commandline "$__PORT")
-        if [[ $__PID -gt 0 ]]; then
-          kill "$__PID" && echo "Killed node with peer id $__PEER_ID and pid $__PID running at port $__PORT."
-          touch "$NODE_DIR/$__PEER_ID/STOPPED"
-        else
-          echo "WARNING: $__PEER_ID node already stopped (port $__PORT)." >&2
-        fi
+        echo "WARNING: $__PEER_ID node already stopped (port $__PORT)." >&2
       fi
     fi
   fi
@@ -807,7 +806,7 @@ snnm_restart_fast(){                                    # -r command: Restart ex
       [ -n "$__PORT" ] && [[ $__PORT -le $__ENDPORT && $__PORT -ge $__STARTPORT ]] && snnm_restart_singleport "$__PORT"
     done
   else
-    [ -n "$__PORT" ] && snnm_restart_singleport "$__PORT"
+    snnm_restart_singleport "$__STARTPORT"
   fi
 }
 
@@ -830,14 +829,16 @@ snnm_restart_singleport(){
      __PEER_ID=$(get_peernodedir_from_peernodedirpath "$__PATH")
      [ -z "$__PEER_ID" ] && echo "FATAL: For port $__PORT failed to extract PEER_ID from path $__PATH." && exit 1
      local __PID
-     __PID=$(get_pid_from_peerid_commandline "$__PEER_ID")
-     if [[ ! $__PID -gt 0 ]]; then
-       __PID=$(get_pid_from_port_commandline "$__PORT")
+
+     __PID=$(get_cached_pid "$__PEER_ID")
+     if [[ -n "$__PID" ]] && ps -e | grep "$__PID" | grep "safenode" ; then
+       : #__PID=$(get_pid_from_port_commandline "$__PORT")    #double-check it is running with a much slower test @@TODO add switch
+     else
+       __PID="0"
      fi
      if [[ $__PID -gt 0 ]]; then
        echo "WARNING: $__PEER_ID node already running, at port $__PORT." >&2
      else
-       echo
        echo "Restarting node with peer id $__PEER_ID running at port $__PORT."
        local __MAXLOGS="1"
        local __MAXARCHLOGS="0"
@@ -884,20 +885,29 @@ snnm_terminate_and_restart_stuck_nodes() {            # -X option, unlike -x, no
       [[ -n "$CONNECTIONSCONDITION" ]] && __CONN_CONDITION="$CONNECTIONSCONDITION"
       if [[ "$_PID" -gt 0 ]] && [[ "$_CONNECTIONSNAP" -le "$__CONN_CONDITION" ]]; then
         echo
-        echo "Problematic node running at port $_PORT, due to $_CONNECTIONSNAP <= $__CONN_CONDITION connections being present"
+        echo "Node at port $_PORT, found with $_CONNECTIONSNAP <= $__CONN_CONDITION connections active at this instant"
         snnm_terminate_singleport "$_PORT"
         sleep 2
         snnm_restart_singleport "$_PORT"
       elif [[ "$_PID" -gt 0 ]]; then
         local _LINE
-        _LINE=$(cat "$SNNM_BYPORT_DIR/$_PORT/logs/safenode.log" | grep -e "Skip bad_nodes check" -e "Performing" | tail -1 | grep "Skip")
-        if [[ -n "$_LINE" ]]; then
+        _LINE=$(cat "$SNNM_BYPORT_DIR/$_PORT/logs/safenode.log" | grep -e "Skip bad_nodes check" -e "Performing the first bootstrap" -e "Attempting to parse" -e "More peers have been added to our RT" | tail -2 )
+        local _LINEBADS
+        _LINEBADS=$(echo "$_LINE" | grep -e "Skip bad_nodes check") #
+        local _LINEGOODS
+        _LINEGOODS=$(echo "$_LINE" | grep -e "Performing the first bootstrap" -e "Attempting to parse" -e "More peers have been added to our RT")
+        if [[ -n "$_LINEBADS" ]] && [[ -z "$_LINEGOODS" ]]; then #in last 2 lines there is a skip, and there is no other positive, then flag bad.
           echo
-          echo "Problematic node at port $_PORT per log probably disconnected: $_LINE"
+          echo "Node at port $_PORT is per log probably disconnected - last two relevant lines:"
+          echo "$_LINE"
           snnm_terminate_singleport "$_PORT"
           sleep 2
           snnm_restart_singleport "$_PORT"
+        else
+          echo "Node at port $_PORT seems okay."
         fi
+      else
+        echo "Node at port $_PORT did not have a PID when we last cached safenode processes. Use -r to restart if needed."
       fi
     fi
   done
