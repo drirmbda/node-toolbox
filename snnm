@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.5.2"
+readonly VERSION="0.5.3"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 readonly AUTHOR="drirmbda_73081"          ; OWNER_DISCORD_ID="$AUTHOR"
@@ -938,11 +938,11 @@ snnm_start_fast(){                                    # -s start a brand new nod
   [ -n "$2" ] && __ENDPORT="$2"
   for __TARGETPORT in $(seq "$__STARTPORT" "$__ENDPORT")
   do
-    local __PORT_OCCUPIED
+    local __PORT_OCCUPIED=""
     __PORT_OCCUPIED=$(is_occupied_udp "$__TARGETPORT")
-    local __DIRPATH
+    local __DIRPATH=""
     __DIRPATH=$(get_peernodedirpath_from_cachedport "$__TARGETPORT")
-    local __PEERID
+    local __PEER_ID=""
     [ -n "$__DIRPATH" ] && __PEER_ID=$(get_peernodedir_from_peernodedirpath "$__DIRPATH")
     [ -n "$__PEER_ID" ] && echo "Port is taken by peer id $__PEER_ID. Use -r restart instead." && __PORT_OCCUPIED="1"
     if [ "$__PORT_OCCUPIED" -gt 0 ]; then
@@ -953,7 +953,7 @@ snnm_start_fast(){                                    # -s start a brand new nod
       local __MAXLOGS=1
       local __MAXARCHLOGS=0
       local __RPC_PORT=""
-      local __METRIC_PORT
+      local __METRIC_PORT=""
       [ "$RPC_ENABLE" = "y" ] && __RPC_PORT=$((__TARGETPORT-NODE_BASE_PORT+RPC_BASE_PORT))
       [ "$RPC_ENABLE" = "y" ] && __METRIC_PORT=$((__TARGETPORT-NODE_BASE_PORT+METRIC_BASE_PORT))
       if [[ $__RPC_PORT -gt 0 ]]; then
@@ -1016,7 +1016,10 @@ cmdline() {
   local LATEST_VERSION
   LATEST_VERSION=$(get_safenode_version)
   #local UPGRADE_VERSION="$LATEST_VERSION"
-  echo "Latest safenode binary is version $LATEST_VERSION"
+  echo "Latest safenode binary is version $LATEST_VERSION."
+  local __ITEMS
+  __ITEMS=$(ls -1 "$NODE_DIR/" | wc -l )
+  echo "Node directory contains $__ITEMS nodes."
   while getopts "ou:sLecjvqKkw:d:hn:M:m:a:b:iltrxXp:z" OPTION   # Process options
   do
     case $OPTION in
@@ -1143,6 +1146,9 @@ NOTE:
      cd $RPC_PROTO_PATH
      wget https://raw.githubusercontent.com/maidsafe/safe_network/main/sn_protocol/src/safenode_proto/safenode.proto -O safenode.proto
      wget https://raw.githubusercontent.com/maidsafe/safe_network/main/sn_protocol/src/safenode_proto/req_resp_types.proto -O req_resp_types.proto
+
+   Migration of old nodes is best done by running -c to update cache as much as possible using running nodes if any,
+   followed by -j to update cache based on old cache information. Then use -r to restart.
 
 EOF
 }
