@@ -1,10 +1,11 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.5.3"
+readonly VERSION="0.5.4"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 readonly AUTHOR="drirmbda_73081"          ; OWNER_DISCORD_ID="$AUTHOR"
+readonly BOOTSTRAPPEER=""
 readonly METRIC_BASE_PORT=10000           # the base is the port ID for the first metrics server
 readonly RPC_BASE_PORT=30000              # the base is the port ID for the first node started with RPC_ENABLE enabled in a call
 readonly NODE_BASE_PORT=50000             # the RPC_PORT becomes node port - NODE_BASE_PORT + RPC_BASE_PORT
@@ -402,6 +403,7 @@ launch_vdash_byport(){
 snnm_node_starter() {
   #NODE_DIR="$HOME/.local/share/safe/node"
   local __OWNER_FLAG="--owner"
+  local __HOMENETWORK_FLAG="--home-network"
   local __PORT_FLAG="--port"
   local __RPC_FLAG="--rpc"
   local __METRIC_FLAG="--metrics-server-port"
@@ -435,6 +437,7 @@ snnm_node_starter() {
     esac
     shift 2   #move $1 and $2 on to point to next args pair
   done
+  [ -n "$BOOTSTRAPPEER" ] && ARGSLINE="$ARGSLINE --peer $BOOTSTRAPPEER"
   echo "UDP: $__PORT RPC: $__RPC METRICS: $__METRIC OWNER: $__OWNER Interactive:$INTERACTIVE..."
   if [ "$INTERACTIVE" = "y" ]; then
     ARGSLINE=$(whiptail --title "Node Toolbox" --inputbox "Edit arguments: " 10 80 "$ARGSLINE" 3>&1 1>&2 2>&3 )
@@ -1168,6 +1171,7 @@ command_exists() { if command -v "$1" > /dev/null 2>&1;
 }
 
 environment_check() {
+  ! command_exists "nc" && echo "FATAL: Requires nc installed" && exit 1   #needed for open port checking
   ! command_exists "timeout" && echo "FATAL: Requires timeout installed" && exit 1   #needed for open port checking
   ! command_exists "safenode" && echo "FATAL: Requires safenode installed" && exit 1
   ! command_exists "netstat" && echo "FATAL: Requires netstat (net-tools) installed" && exit 1
