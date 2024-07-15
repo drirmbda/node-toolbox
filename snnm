@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.5.4"
+readonly VERSION="0.6.1"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 readonly AUTHOR="drirmbda_73081"          ; OWNER_DISCORD_ID="$AUTHOR"
@@ -22,6 +22,7 @@ NODE_DIR="$HOME/.local/share/safe/node"   # Default location of peer_id director
 SNNM_DIR="$NODE_DIR/../snnm"              # location for snnm files, other than those stored within each node directory
 SNNM_BYPORT_DIR="$SNNM_DIR/by-port"       # location for snnm by-port links
 SNNM_BYPEER_DIR="$SNNM_DIR/by-peerid"     # location for snnm by-port links
+DESTROY_ALLOWED=""                        # flag to enable destruction (archiving) of a node at termination
 REUSE_LATEST_PSCACHE=""                   # Do not try to reuse cached process data obtained using ps command
 INTERACTIVE=""                            # "y" indicates selection of interactive mode with TUI or GUI, not the default
 RPC_PROTO_PATH="$HOME"                    # Default location of .proto files compatible with safenode binary
@@ -199,6 +200,13 @@ symlink_cache_byport_to_peernodedir(){
   fi
 }
 
+delete_symlink_cache_byport(){
+  local __PORT="$1"
+  if [ -n "$__PORT" ]; then
+    [ -L "$SNNM_BYPORT_DIR/$__PORT" ] && rm "$SNNM_BYPORT_DIR/$__PORT"
+  fi
+}
+
 #creates an entry in the by-port directory named port number to the corresponding node directory
 symlink_cache_bypeerid_to_peernodedir(){
   local __NODE_PEER_PATH="$1"
@@ -206,6 +214,13 @@ symlink_cache_bypeerid_to_peernodedir(){
   if [ -n "$__PEER_ID" ]; then
     [ -L "$SNNM_BYPEER_DIR/$__PEER_ID" ] && rm "$SNNM_BYPEER_DIR/$__PEER_ID"
     ln -s "$__NODE_PEER_PATH" "$SNNM_BYPEER_DIR/$__PEER_ID"
+  fi
+}
+
+delete_symlink_cache_bypeerid(){
+  local __PEER_ID="$1"
+  if [ -n "$__PEER_ID" ]; then
+    [ -L "$SNNM_BYPEER_DIR/$__PEER_ID" ] && rm "$SNNM_BYPEER_DIR/$__PEER_ID"
   fi
 }
 
@@ -567,6 +582,15 @@ snnm_pullin_legacy_stopped_nodes(){
   done
 }
 
+archive_node_in_place(){ #this must be preceded by removal of symlinks
+  local _PEER_ID="$1"
+  local _PORT="$2"
+  if [[ -n "$_PEER_ID" ]] && [[ -n "$_PORT" ]]; then
+    echo "Archiving in place peer_id $_PEER_ID of port $_PORT."
+    mv "$NODE_DIR/$_PEER_ID" "$NODE_DIR/$_PEER_ID-$_PORT"
+  fi
+}
+
 #######################################################################################################################
 # CLI utility main functions
 ########################################################################################################################
@@ -791,6 +815,12 @@ snnm_terminate_singleport(){
       else
         echo "WARNING: $__PEER_ID node already stopped (port $__PORT)." >&2
       fi
+      if [[ -n "$DESTROY_ALLOWED" ]]; then
+        # destroy node by archiving node in place and removing PORT and PEERID synlinks
+        delete_symlink_cache_byport "$__PORT"
+        delete_symlink_cache_bypeerid "$__PEER_ID"
+        archive_node_in_place "$__PEER_ID" "$__PORT"
+      fi
     fi
   fi
 }
@@ -830,9 +860,18 @@ snnm_restart_singleport(){
        __PATH="" #symlink is invalid so ignore it.
      fi
      __PEER_ID=$(get_peernodedir_from_peernodedirpath "$__PATH")
-     [ -z "$__PEER_ID" ] && echo "FATAL: For port $__PORT failed to extract PEER_ID from path $__PATH." && exit 1
+     if [ -z "$__PEER_ID" ]; then
+       echo "FATAL: For port $__PORT failed to extract PEER_ID from path $__PATH."
+       echo "----------------------------------------------------------------------"
+       echo "TRY START REPLACEMENT USING SOMETHING LIKE: ./snnm -p $__PORT -w 0 -s"
+       snnm_start_fast "$__PORT" "$__PORT" #-s
+       #echo "./snnm -p $__PORT -w 10 -s" >> "./RECOVERYCOMMANDS"
+       #(./snnm -p "$__PORT" -w 0 -s )
+       #echo
+       return
+       #exit 1
+     fi
      local __PID
-
      __PID=$(get_cached_pid "$__PEER_ID")
      if [[ -n "$__PID" ]] && ps -e | grep "$__PID" | grep "safenode" ; then
        : #__PID=$(get_pid_from_port_commandline "$__PORT")    #double-check it is running with a much slower test @@TODO add switch
@@ -906,8 +945,29 @@ snnm_terminate_and_restart_stuck_nodes() {            # -X option, unlike -x, no
           snnm_terminate_singleport "$_PORT"
           sleep 2
           snnm_restart_singleport "$_PORT"
-        else
-          echo "Node at port $_PORT seems okay."
+        else # Additional bad conditions check
+          local _LINES
+          _LINES=$(cat "$SNNM_BYPORT_DIR/$_PORT/logs/safenode.log" | wc -l )
+          grep "consider us as BAD" "$SNNM_BYPORT_DIR/$_PORT/logs/safenode.log"* > "$SNNM_BYPORT_DIR/$_PORT/logs/BAD.tmp"
+          local _BADLINES
+          _BADLINES=$(wc -l < "$SNNM_BYPORT_DIR/$_PORT/logs/BAD.tmp")
+          local _TOTAL_BADLINES="0"
+          if [[ "$_BADLINES" -ge "1" ]]; then
+            sort -u "$SNNM_BYPORT_DIR/$_PORT/logs/BAD."* > "$SNNM_BYPORT_DIR/$_PORT/logs/BAD.log"
+          fi
+          [[ -f "$SNNM_BYPORT_DIR/$_PORT/logs/BAD.log" ]] && _TOTAL_BADLINES=$(wc -l < "$SNNM_BYPORT_DIR/$_PORT/logs/BAD.log")
+          local _CPULINES
+          _CPULINES=$(cat "$SNNM_BYPORT_DIR/$_PORT/logs/safenode.log" | tail -30 | grep "physical_cpu_threads" | wc -l )
+          local _RECORDLINES
+          _RECORDLINES=$(grep "Wrote record" "$SNNM_BYPORT_DIR/$_PORT/logs/safenode.log" | wc -l )
+          if [[ "$_BADLINES" -ge "1" ]] || [[ "$LINES" -ge "1000" ]] && [[ "$_CPULINES" -ge "20" ]]; then
+            echo "Node at port $_PORT seems STALE - SHOULD BE DESTROYED (CPUlines $_CPULINES; BADlines $_BADLINES/$_TOTAL_BADLINES, WROTElines $_RECORDLINES of $_LINES)"
+            echo "TRY START REPLACEMENT USING SOMETHING LIKE: ./snnm -p $__PORT -D -X"
+            #eval "$HOME/snnm -p $__PORT -D -X"
+            exit 1
+          else
+            echo "Node at port $_PORT seems okay. (CPUlines $_CPULINES; BADlines $_BADLINES/$_TOTAL_BADLINES, WROTElines $_RECORDLINES of $_LINES)"
+          fi
         fi
       else
         echo "Node at port $_PORT did not have a PID when we last cached safenode processes. Use -r to restart if needed."
@@ -1023,7 +1083,7 @@ cmdline() {
   local __ITEMS
   __ITEMS=$(ls -1 "$NODE_DIR/" | wc -l )
   echo "Node directory contains $__ITEMS nodes."
-  while getopts "ou:sLecjvqKkw:d:hn:M:m:a:b:iltrxXp:z" OPTION   # Process options
+  while getopts "Dou:sLecjvqKkw:d:hn:M:m:a:b:iltrxXp:z" OPTION   # Process options
   do
     case $OPTION in
       h) usage;
@@ -1032,6 +1092,7 @@ cmdline() {
          exit 0 ;;
       m) MATCHCONDITION=${OPTARG} ;;
       M) CONNECTIONSCONDITION=${OPTARG} ;;
+      D) DESTROY_ALLOWED="y" ;;
       a) STARTPORT=${OPTARG}
          [ -z "$STARTPORT" ] && echo "FATAL: -a option missing value" && exit 1
          [ "$STARTPORT" -lt "$NODE_BASE_PORT" ] && echo "FATAL: Starting port number must be >= $NODE_BASE_PORT" && exit 1
@@ -1106,6 +1167,7 @@ OPTIONS:
 EXPERT OPTIONS:
    -m <condition> condition for -t operation to proceed: Only if forwarded nanos less or equal provided value
    -M <condition> condition for -X operation to proceed: Only if connection counts is less or equal provided value
+   -D allow destruction/archiving of nodes that are terminated
    -n <seconds> port monitoring time window for determining number of active connection (with -l command)
    -z reuse prior ps process information cache. This may result in unintended consequences if not used with care.
    -u <path> specify an alternate path to a safenode binary to downgrade or enable some other, less common, operations
@@ -1184,6 +1246,7 @@ environment_check() {
   command_exists "grpcurl" && command_exists "jq" && RPC_SUPPORT_CHECK_RESULT="y"
   [ -n "$RPC_SHOW" ] && [ -z "$RPC_SUPPORT_CHECK_RESULT" ] && echo "FATAL: RPC calls not enabled. Ensure grpcurl and jq are both installed." && exit 1
   [ "$OWNER_DISCORD_ID" != "none" ] && echo "OWNER_DISCORD_ID is set to $OWNER_DISCORD_ID in the snnm script. To unset it, change it to none."
+  [ -n "$BOOTSTRAPPEER" ] && echo "BOOTSTRAP PEER is set to $BOOTSTRAPPEER in the snnm script."
 }
 
 main() {
