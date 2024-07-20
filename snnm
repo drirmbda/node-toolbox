@@ -1,11 +1,16 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.6.1"
+readonly VERSION="0.6.3"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
+###########################################
 readonly AUTHOR="drirmbda_73081"          ; OWNER_DISCORD_ID="$AUTHOR"
 readonly BOOTSTRAPPEER=""
+
+
+UPNP=""                                   # default networking setup, set to "Y" or non-empty to apply --upnp
+###########################################
 readonly METRIC_BASE_PORT=10000           # the base is the port ID for the first metrics server
 readonly RPC_BASE_PORT=30000              # the base is the port ID for the first node started with RPC_ENABLE enabled in a call
 readonly NODE_BASE_PORT=50000             # the RPC_PORT becomes node port - NODE_BASE_PORT + RPC_BASE_PORT
@@ -349,7 +354,8 @@ get_forwarded_nanos(){
 #usage example: A=$(is_occupied_udp <port>) ; [[ $A -gt 0 ]]  && echo "yes it is!"
 is_occupied_udp(){
   local __PORT="$1"
-  timeout --preserve-status 0.1 nc -l -u -p "$__PORT" > /dev/null 2>&1
+  timeout --preserve-status 0.1 nc -l -u "$__PORT" > /dev/null 2>&1
+  #timeout --preserve-status 0.1 nc -l -u -p "$__PORT" > /dev/null 2>&1
   if [ "$?" -lt 143 ]; then
     echo "1" #occupied
   else
@@ -359,7 +365,8 @@ is_occupied_udp(){
 
 is_occupied_tcp(){
   local __PORT="$1"
-  timeout --preserve-status 0.1 nc -l -t -p "$__PORT" > /dev/null 2>&1
+  timeout --preserve-status 0.1 nc -l -t "$__PORT" > /dev/null 2>&1
+  #timeout --preserve-status 0.1 nc -l -t -p "$__PORT" > /dev/null 2>&1
   if [ "$?" -lt 143 ]; then
     echo "1" #occupied
   else
@@ -419,6 +426,7 @@ snnm_node_starter() {
   #NODE_DIR="$HOME/.local/share/safe/node"
   local __OWNER_FLAG="--owner"
   local __HOMENETWORK_FLAG="--home-network"
+  local __UPNP_FLAG="--upnp"
   local __PORT_FLAG="--port"
   local __RPC_FLAG="--rpc"
   local __METRIC_FLAG="--metrics-server-port"
@@ -453,6 +461,7 @@ snnm_node_starter() {
     shift 2   #move $1 and $2 on to point to next args pair
   done
   [ -n "$BOOTSTRAPPEER" ] && ARGSLINE="$ARGSLINE --peer $BOOTSTRAPPEER"
+  [ -n "$UPNP" ] && ARGSLINE="$ARGSLINE $__UPNP_FLAG"
   echo "UDP: $__PORT RPC: $__RPC METRICS: $__METRIC OWNER: $__OWNER Interactive:$INTERACTIVE..."
   if [ "$INTERACTIVE" = "y" ]; then
     ARGSLINE=$(whiptail --title "Node Toolbox" --inputbox "Edit arguments: " 10 80 "$ARGSLINE" 3>&1 1>&2 2>&3 )
@@ -960,13 +969,15 @@ snnm_terminate_and_restart_stuck_nodes() {            # -X option, unlike -x, no
           _CPULINES=$(cat "$SNNM_BYPORT_DIR/$_PORT/logs/safenode.log" | tail -30 | grep "physical_cpu_threads" | wc -l )
           local _RECORDLINES
           _RECORDLINES=$(grep "Wrote record" "$SNNM_BYPORT_DIR/$_PORT/logs/safenode.log" | wc -l )
+          local _REPORTLINES
+          _REPORTLINES=$(cat "$SNNM_BYPORT_DIR/$_PORT/logs/safenode.log" | tail -1000 | grep "is reported as having issue" | wc -l)
           if [[ "$_BADLINES" -ge "1" ]] || [[ "$LINES" -ge "1000" ]] && [[ "$_CPULINES" -ge "20" ]]; then
-            echo "Node at port $_PORT seems STALE - SHOULD BE DESTROYED (CPUlines $_CPULINES; BADlines $_BADLINES/$_TOTAL_BADLINES, WROTElines $_RECORDLINES of $_LINES)"
+            echo "Node at port $_PORT seems STALE - SHOULD BE DESTROYED (CPUlines $_CPULINES; BADlines $_BADLINES/$_TOTAL_BADLINES, REPORTlines $_REPORTLINES, WROTElines $_RECORDLINES of $_LINES)"
             echo "TRY START REPLACEMENT USING SOMETHING LIKE: ./snnm -p $__PORT -D -X"
             #eval "$HOME/snnm -p $__PORT -D -X"
             exit 1
           else
-            echo "Node at port $_PORT seems okay. (CPUlines $_CPULINES; BADlines $_BADLINES/$_TOTAL_BADLINES, WROTElines $_RECORDLINES of $_LINES)"
+            echo "Node at port $_PORT seems okay. (CPUlines $_CPULINES; BADlines $_BADLINES/$_TOTAL_BADLINES, REPORTlines $_REPORTLINES, WROTElines $_RECORDLINES of $_LINES)"
           fi
         fi
       else
@@ -1198,12 +1209,12 @@ NOTE:
    This program requires safenode binaries to be available to start nodes. This requires installation of the rust
    programming language and a tool to manage safenode binaries: safeup.
 
-   For all full functionality to be available install whiptail (newt), grpcurl, jq, netstat (net-tools), wget.
-   Make sure that the .proto files safenode.proto and req_resp_types.proto are placed in $RPC_PROTO_PATH.
-   These files are available from: https://github.com/maidsafe/safe_network/tree/main/sn_protocol/src/safenode_proto
+   For all full functionality to be available install whiptail (newt), grpcurl, jq, netstat (net-tools), netcat,
+   strace, timeout, and wget. Make sure that the .proto files safenode.proto and req_resp_types.proto are placed in
+   $RPC_PROTO_PATH. These files are available from: https://github.com/maidsafe/safe_network/tree/main/sn_protocol/src/safenode_proto
 
    Installation example:
-     sudo dnf -y install newt jq net-tools wget
+     sudo dnf -y install newt jq net-tools wget netcat strace timeout
      wget https://github.com/fullstorydev/grpcurl/releases/download/v1.9.1/grpcurl_1.9.1_linux_386.rpm
      sudo rpm -i grpcurl_1.9.1_linux_386.rpm
      sudo dnf -y install grpcurl jq
@@ -1233,7 +1244,8 @@ command_exists() { if command -v "$1" > /dev/null 2>&1;
 }
 
 environment_check() {
-  ! command_exists "nc" && echo "FATAL: Requires nc installed" && exit 1   #needed for open port checking
+  ! command_exists "nc" && echo "FATAL: Requires nc/netcat installed" && exit 1   #needed for open port checking
+  ! command_exists "strace" && echo "FATAL: Requires strace installed" && exit 1   #needed for open port checking
   ! command_exists "timeout" && echo "FATAL: Requires timeout installed" && exit 1   #needed for open port checking
   ! command_exists "safenode" && echo "FATAL: Requires safenode installed" && exit 1
   ! command_exists "netstat" && echo "FATAL: Requires netstat (net-tools) installed" && exit 1
