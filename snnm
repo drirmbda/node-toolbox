@@ -1,14 +1,12 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.6.3"
+readonly VERSION="0.6.4"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 ###########################################
 readonly AUTHOR="drirmbda_73081"          ; OWNER_DISCORD_ID="$AUTHOR"
 readonly BOOTSTRAPPEER=""
-
-
 UPNP=""                                   # default networking setup, set to "Y" or non-empty to apply --upnp
 ###########################################
 readonly METRIC_BASE_PORT=10000           # the base is the port ID for the first metrics server
@@ -28,6 +26,7 @@ SNNM_DIR="$NODE_DIR/../snnm"              # location for snnm files, other than 
 SNNM_BYPORT_DIR="$SNNM_DIR/by-port"       # location for snnm by-port links
 SNNM_BYPEER_DIR="$SNNM_DIR/by-peerid"     # location for snnm by-port links
 DESTROY_ALLOWED=""                        # flag to enable destruction (archiving) of a node at termination
+ARCHIVE_STOPPED=""                        # flag to enable destruction (archiving) of a node if not running
 REUSE_LATEST_PSCACHE=""                   # Do not try to reuse cached process data obtained using ps command
 INTERACTIVE=""                            # "y" indicates selection of interactive mode with TUI or GUI, not the default
 RPC_PROTO_PATH="$HOME"                    # Default location of .proto files compatible with safenode binary
@@ -981,7 +980,30 @@ snnm_terminate_and_restart_stuck_nodes() {            # -X option, unlike -x, no
           fi
         fi
       else
-        echo "Node at port $_PORT did not have a PID when we last cached safenode processes. Use -r to restart if needed."
+        if [[ -n "$ARCHIVE_STOPPED" ]]; then
+          if [[ -n "$_PID" ]] && ps -e | grep "$_PID" | grep "safenode" ; then
+            _PID=$(get_pid_from_port_commandline "$_PORT")       #double-check would be safer but much slower. @@TODO add switch
+          else
+            _PID="0"
+          fi
+          if [[ "$_PID" -le 0 ]] && [[ -n "$DESTROY_ALLOWED" ]]; then
+            local __PEER_ID
+            local __PEER_DIR
+            __PEER_DIR=$(get_peernodedirpath_from_cachedport "$_PORT")
+            __PEER_ID=$(get_peernodedir_from_peernodedirpath "$__PEER_DIR")
+            # destroy node by archiving node in place and removing PORT and PEERID synlinks
+            if [[ -n "$__PEER_ID" ]]; then
+              echo "Archiving stopped PEER ID that was at PORT $_PORT ."
+              delete_symlink_cache_byport "$_PORT"
+              delete_symlink_cache_bypeerid "$__PEER_ID"
+              archive_node_in_place "$__PEER_ID" "$_PORT"
+            else
+              echo "Failed to get PEER ID from cached PORT $_PORT - skipping archiving action"
+            fi
+          fi
+        else
+          echo "Node at port $_PORT did not have a PID when we last cached safenode processes. Use -r to restart if needed."
+        fi
       fi
     fi
   done
@@ -1094,7 +1116,7 @@ cmdline() {
   local __ITEMS
   __ITEMS=$(ls -1 "$NODE_DIR/" | wc -l )
   echo "Node directory contains $__ITEMS nodes."
-  while getopts "Dou:sLecjvqKkw:d:hn:M:m:a:b:iltrxXp:z" OPTION   # Process options
+  while getopts "DCou:sLecjvqKkw:d:hn:M:m:a:b:iltrxXp:z" OPTION   # Process options
   do
     case $OPTION in
       h) usage;
@@ -1104,6 +1126,7 @@ cmdline() {
       m) MATCHCONDITION=${OPTARG} ;;
       M) CONNECTIONSCONDITION=${OPTARG} ;;
       D) DESTROY_ALLOWED="y" ;;
+      C) ARCHIVE_STOPPED="y" ;;
       a) STARTPORT=${OPTARG}
          [ -z "$STARTPORT" ] && echo "FATAL: -a option missing value" && exit 1
          [ "$STARTPORT" -lt "$NODE_BASE_PORT" ] && echo "FATAL: Starting port number must be >= $NODE_BASE_PORT" && exit 1
@@ -1178,7 +1201,8 @@ OPTIONS:
 EXPERT OPTIONS:
    -m <condition> condition for -t operation to proceed: Only if forwarded nanos less or equal provided value
    -M <condition> condition for -X operation to proceed: Only if connection counts is less or equal provided value
-   -D allow destruction/archiving of nodes that are terminated
+   -D allow destruction/archiving of nodes that are terminated during -X operation
+   -C archive stopped nodes during -X operation, requires -D as well to be effective
    -n <seconds> port monitoring time window for determining number of active connection (with -l command)
    -z reuse prior ps process information cache. This may result in unintended consequences if not used with care.
    -u <path> specify an alternate path to a safenode binary to downgrade or enable some other, less common, operations
@@ -1204,6 +1228,10 @@ EXAMPLES:
    $0 -p $NODE_BASE_PORT -e -s -l
    $0 -a 65000 -b 65009 -d $AUTHOR -w 360 -e -x
    $0 -b 65009 -e -t -k -a 65000 -b 65004 -w 60 -r -k
+   $0 -l | tee $(date +%Y%m%d-%H:%M |tr -d '[ ]')-snnm-l
+   $0 -m 10 -t
+   $0 -M -1 -w 120 -D -X | tee $(date +%Y%m%d-%H:%M |tr -d '[ ]')-snnm-X
+   $0 -M -1 -w 120 -C -D -X | tee $(date +%Y%m%d-%H:%M |tr -d '[ ]')-snnm-X
 
 NOTE:
    This program requires safenode binaries to be available to start nodes. This requires installation of the rust
