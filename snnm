@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.6.4"
+readonly VERSION="0.6.5"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 ###########################################
@@ -17,7 +17,7 @@ RENICE=10                                 # Default renice just after node start
 ENDPORT=65535                             # Default upper end of port range, inclusive
 WAIT_SECS=10                              # Default wait between new node starts
 STRACE_SECS="0.5"                         # Default strace scanning time for port traffic
-MATCHCONDITION=""                         # Default matching condition for -t operations
+MATCHCONDITION="10"                       # Default matching condition for -t operations, can be modified using -m
 CONNECTIONSCONDITION=""                   # Default matching condition for -x operations
 SAFENODEPATH="$HOME/.local/bin/safenode"  # Default safenode binary, full path
 SAFENODEBINARYPATHOVERRIDE=""             # For specifying an alternate binary path
@@ -802,8 +802,8 @@ snnm_terminate_singleport(){
     __PATH=$(realpath "$SNNM_BYPORT_DIR/$__PORT")
     __PEER_ID=$(get_peernodedir_from_peernodedirpath "$__PATH")
     local __PREVENT_OPERATION
+    __PREVENT_OPERATION="y" #by default block this operation if a match condition is set
     if [ -n "$MATCHCONDITION" ]; then
-      __PREVENT_OPERATION="y" #by default block this operation if a match condition is set
       if [ -n "$__PEER_ID" ]; then
         __FORWARDED_NANOS=$(get_forwarded_nanos "$__PEER_ID")
         [ "$__FORWARDED_NANOS" -le "$MATCHCONDITION" ] && __PREVENT_OPERATION="" #clear block to proceed
@@ -1199,7 +1199,7 @@ OPTIONS:
    -w <seconds> wait time in seconds between launch of new nodes
 
 EXPERT OPTIONS:
-   -m <condition> condition for -t operation to proceed: Only if forwarded nanos less or equal provided value
+   -m <condition> condition for -t operation to proceed: Only if forwarded nanos less provided value
    -M <condition> condition for -X operation to proceed: Only if connection counts is less or equal provided value
    -D allow destruction/archiving of nodes that are terminated during -X operation
    -C archive stopped nodes during -X operation, requires -D as well to be effective
