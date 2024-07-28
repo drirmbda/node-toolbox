@@ -4,17 +4,17 @@
 readonly VERSION="0.7.2"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
-###########################################
-readonly AUTHOR="drirmbda_73081"          ; OWNER_DISCORD_ID="$AUTHOR"
+UPNP="Y"                                   # default networking setup, set to "Y" or non-empty to apply --upnp
+
 EXPLICITPEERS="Y"                         # if "Y" cache bootstrap nodes list and specify peers explicitly on commandline
+                                          # DO NOT USE "Y" JUST AFTER NEW NETWORK IS UP as NEWTORKCONTACT URL MAY HAVE CHANGED!
 FORCECACHEDBOOTSTRAPLIST=""               # set to "Y" selects the cached bootsrapnode list (if existing from prior snnm invocation)
-ADDCUSTOMPEERS="Y"                        # Prevent using custom peers by setting to "", otherwise use "Y"
 NETWORKCONTACTS=""
 NETWORKCONTACTS="https://sn-testnet.s3.eu-west-2.amazonaws.com/network-contacts"
-BOOTSTRAPPEER=""
 
-UPNP="Y"                                   # default networking setup, set to "Y" or non-empty to apply --upnp
-###########################################
+ADDCUSTOMPEERS="Y"                        # Prevent using custom peers by setting to "", otherwise use "Y"
+BOOTSTRAPPEER=""
+#BOOTSTRAPPEER="/ip4/<IP ADDRESS>/udp/<PORT NUMBER>/quic-v1/p2p/<PEER ID 12D3Kxxxx>"
 STARTCHECKS="Y"                           # enable checks on start to ensure good start by setting this "Y"
 readonly METRIC_BASE_PORT=10000           # the base is the port ID for the first metrics server
 readonly RPC_BASE_PORT=30000              # the base is the port ID for the first node started with RPC_ENABLE enabled in a call
