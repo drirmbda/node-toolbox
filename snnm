@@ -729,6 +729,7 @@ archive_node_in_place(){ #this must be preceded by removal of symlinks
 
 #usage: snnm_list <optional start of port range overriding STARTPORT> <optional end of port range overriding ENDPORT>
 # global NODE_DIR must be set. This function is for migration from older snnm versions and checking all ports, cmd -k
+
 snnm_list() {
   local __STARTPORT="$STARTPORT"
   local __ENDPORT="$ENDPORT"
