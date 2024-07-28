@@ -1,14 +1,21 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.6.5"
+readonly VERSION="0.7.2"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 ###########################################
 readonly AUTHOR="drirmbda_73081"          ; OWNER_DISCORD_ID="$AUTHOR"
-readonly BOOTSTRAPPEER=""
-UPNP=""                                   # default networking setup, set to "Y" or non-empty to apply --upnp
+EXPLICITPEERS="Y"                         # if "Y" cache bootstrap nodes list and specify peers explicitly on commandline
+FORCECACHEDBOOTSTRAPLIST=""               # set to "Y" selects the cached bootsrapnode list (if existing from prior snnm invocation)
+ADDCUSTOMPEERS="Y"                        # Prevent using custom peers by setting to "", otherwise use "Y"
+NETWORKCONTACTS=""
+NETWORKCONTACTS="https://sn-testnet.s3.eu-west-2.amazonaws.com/network-contacts"
+BOOTSTRAPPEER=""
+
+UPNP="Y"                                   # default networking setup, set to "Y" or non-empty to apply --upnp
 ###########################################
+STARTCHECKS="Y"                           # enable checks on start to ensure good start by setting this "Y"
 readonly METRIC_BASE_PORT=10000           # the base is the port ID for the first metrics server
 readonly RPC_BASE_PORT=30000              # the base is the port ID for the first node started with RPC_ENABLE enabled in a call
 readonly NODE_BASE_PORT=50000             # the RPC_PORT becomes node port - NODE_BASE_PORT + RPC_BASE_PORT
@@ -33,7 +40,59 @@ RPC_PROTO_PATH="$HOME"                    # Default location of .proto files com
 RPC_ENABLE=""                             # "y" indicates rpc port should be set at start
 RPC_SUPPORT_CHECK_RESULT=""               # "y" indicates JSON processor jq is available (set automatically in code below)
 
+BOOTSTRAPLISTCACHED=""                    # flag to ensure bootstrap list caching is done only once and only when needed
+
 #if xhost >& /dev/null ; then readonly HAVEDISP="y" ; fi # check if display server is running to replace TUI by GUI
+
+########################################################################################################################
+# BOOT STRAP NODE LIST CACHE
+########################################################################################################################
+
+add_custom_bootstrappeers(){
+  #[[ -f "/tmp/safe-network-contacts" ]] && mv "/tmp/safe-network-contacts" "/tmp/safe-network-contacts.bak"
+  [ -n "$BOOTSTRAPPEER" ] && echo "$BOOTSTRAPPEER" >> "/tmp/safe-network-contacts"
+  [ -n "$BOOTSTRAPPEER1" ] &&  echo "$BOOTSTRAPPEER1" >> "/tmp/safe-network-contacts"
+  [ -n "$BOOTSTRAPPEER2" ] &&  echo "$BOOTSTRAPPEER2" >> "/tmp/safe-network-contacts"
+  [ -n "$BOOTSTRAPPEER3" ] &&  echo "$BOOTSTRAPPEER3" >> "/tmp/safe-network-contacts"
+  [ -n "$BOOTSTRAPPEER4" ] &&  echo "$BOOTSTRAPPEER4" >> "/tmp/safe-network-contacts"
+  [ -n "$BOOTSTRAPPEER5" ] &&  echo "$BOOTSTRAPPEER5" >> "/tmp/safe-network-contacts"
+  [ -n "$BOOTSTRAPPEER6" ] &&  echo "$BOOTSTRAPPEER6" >> "/tmp/safe-network-contacts"
+  [ -n "$BOOTSTRAPPEER7" ] &&  echo "$BOOTSTRAPPEER7" >> "/tmp/safe-network-contacts"
+}
+
+snnm_get_bootstrapnodelist(){
+  if [[ -z  "$BOOTSTRAPLISTCACHED" ]]; then
+    if [[ -n "$FORCECACHEDBOOTSTRAPLIST" ]]; then
+      [[ -f "/tmp/safe-network-contacts-official.latest" ]] && cp "/tmp/safe-network-contacts-official.latest" "/tmp/safe-network-contacts"
+    else
+      [[ -f "/tmp/safe-network-contacts" ]] && rm "/tmp/safe-network-contacts"
+      if [[ -n "$NETWORKCONTACTS" ]]; then
+        echo "Requesting bootstrap node list from  $NETWORKCONTACTS..."
+        wget -q "$NETWORKCONTACTS" -O "/tmp/safe-network-contacts"
+        [[ ! -f "/tmp/safe-network-contacts" ]] && echo "FAILED getting $NETWORKCONTACTS."
+        if [[ ! -s "/tmp/safe-network-contacts" ]]; then
+          echo "FAILED getting $NETWORKCONTACTS data."
+        else
+          cp "/tmp/safe-network-contacts" "/tmp/safe-network-contacts-official.latest"
+        fi
+      fi
+    fi
+    [ -n "$ADDCUSTOMPEERS" ] && [ -n "$BOOTSTRAPPEER" ] && add_custom_bootstrappeers && echo "Added custom peers to bootstrap node list."
+    [ -n "$ADDCUSTOMPEERS" ] && [ -n "$BOOTSTRAPPEER" ] && echo "At least one BOOTSTRAP PEER set: $BOOTSTRAPPEER at top of snnm script."
+    BOOTSTRAPLISTCACHED="Y"
+  fi
+}
+
+explicit_peers_list(){
+  local __ARGUMENTSLIST=""
+  if [[ -f "/tmp/safe-network-contacts" ]]; then
+    while read line
+    do
+      [ -n "$line" ] && __ARGUMENTSLIST="$__ARGUMENTSLIST --peer $line"
+    done < "/tmp/safe-network-contacts"
+  fi
+  echo "$__ARGUMENTSLIST"
+}
 
 ########################################################################################################################
 # METRICS server support
@@ -379,9 +438,56 @@ get_receiving_connections_bypid(){
     echo "0"
   else
     local __DATA
-    __DATA=$(timeout "$STRACE_SECS" strace -tfp "$__PID" -s 1 --trace=network 2>&1 | grep recv | grep "iov_len=94208")
+    __DATA=$(timeout "$STRACE_SECS" strace -tfp " $__PID" -s 1 --trace=network 2>&1 | grep recv | grep "iov_len=94208")
     echo "$__DATA" | grep -oP "(?<=sin_addr=inet_addr\\(\")[0-9,.]*" | sort | uniq -c #| wc -l
   fi
+}
+
+########################################################################################################################
+# Log analysis and checking
+########################################################################################################################
+
+tac_latest_safenoderun_log() {
+  tac "$NODE_DIR/$__PEER_ID/logs/safenode.log" | awk '/======/ {exit} {print}'
+}
+
+snnm_log_includes_check() {
+  local __PEER_ID="$1"
+  local __WHAT_STRING="$2"
+  local __TIMEOUT="0"
+  [[ -n "$3" ]] && __TIMEOUT="$3"
+  local __STARTTIME
+  local __RESULT
+  __STARTTIME=$(date +%s)
+  local __ELAPSED
+  if [[ -f "$NODE_DIR/$__PEER_ID/logs/safenode.log" ]]; then
+    __NOWTIME=$(date +%s)
+    __ELAPSED=$((__NOWTIME-__STARTTIME ))
+    while [[ -z "$__RESULT" && "$__ELAPSED" -lt "$__TIMEOUT" ]]; do
+      [[ "$__TIMEOUT" -gt "1" ]] && sleep 1
+      __RESULT=$(tac_latest_safenoderun_log "$NODE_DIR/$__PEER_ID/logs/safenode.log" | grep "$__WHAT_STRING" )
+      [[ -n "$__RESULT" ]] && echo "1"
+      __NOWTIME=$(date +%s)
+      __ELAPSED=$((__NOWTIME-__STARTTIME ))
+    done
+  fi
+}
+
+snnm_log_keys_bad_check(){
+  local __PEER_ID="$1"
+  local __LOGREADY
+  local __RESULT
+  __LOGREADY=$(snnm_log_includes_check "$__PEER_ID" "Local node is listening" "10")
+  [[ -n "$__LOGREADY" ]] && __RESULT=$(snnm_log_includes_check "$__PEER_ID" "FOR TESTING PURPOSES")
+  [[ -n "$__RESULT" ]] && echo "$__RESULT"
+}
+
+snnm_log_peer_added_check(){
+  local __PEER_ID="$1"
+  local __LOGREADY
+  local __RESULT
+  __RESULT=$(snnm_log_includes_check "$__PEER_ID" "PeerAddedToRoutingTable" "60")
+  [[ -n "$__RESULT" ]] && echo "1"
 }
 
 ########################################################################################################################
@@ -422,6 +528,7 @@ launch_vdash_byport(){
 
 #usage" snnm_node_starter ... <rpc-port is optional>
 snnm_node_starter() {
+  [ -n "$EXPLICITPEERS" ] && snnm_get_bootstrapnodelist          # this only runs once per snnm session
   #NODE_DIR="$HOME/.local/share/safe/node"
   local __OWNER_FLAG="--owner"
   local __HOMENETWORK_FLAG="--home-network"
@@ -459,7 +566,9 @@ snnm_node_starter() {
     esac
     shift 2   #move $1 and $2 on to point to next args pair
   done
-  [ -n "$BOOTSTRAPPEER" ] && ARGSLINE="$ARGSLINE --peer $BOOTSTRAPPEER"
+  local __EXPLICIT_PEERS=""
+  __EXPLICIT_PEERS=$(explicit_peers_list)
+  [ -n "$__EXPLICIT_PEERS" ] && ARGSLINE="$ARGSLINE $__EXPLICIT_PEERS"
   [ -n "$UPNP" ] && ARGSLINE="$ARGSLINE $__UPNP_FLAG"
   echo "UDP: $__PORT RPC: $__RPC METRICS: $__METRIC OWNER: $__OWNER Interactive:$INTERACTIVE..."
   if [ "$INTERACTIVE" = "y" ]; then
@@ -486,6 +595,21 @@ snnm_node_starter() {
     [ -n "$__PEER_ID_TERMINAL" ] && __PEER_ID="$__PEER_ID_TERMINAL"
   fi
   [ -z "$__PEER_ID" ] && echo "FATAL: For port $__PORT failed to extract PEER_ID for pid $__PID from port $__PORT, nor from terminal output file $__PEER_ID_TERMINAL" && exit 1
+  local __KEYCHECK
+  __KEYCHECK=$(snnm_log_keys_bad_check "$__PEER_ID")
+  [[ -n "$__KEYCHECK" ]] && echo "FATAL: For port $__PORT failed due to TESTING KEY COMPILED INTO SAFENODE." && exit 1
+  if [[ -n "$STARTCHECKS" ]]; then
+    echo -n "StartCheck $__PORT: "
+    local __ADDING_PEERS
+    __ADDING_PEERS=$(snnm_log_peer_added_check "$__PEER_ID")
+    if [[ -z "$__ADDING_PEERS" ]]; then
+      echo "Log check timed out looking for adding of peers - NODE MOST LIKELY FAILING... FAIL"
+      echo "##################################################################################"
+      echo "##################################################################################"
+    else
+      echo "Log contains message of adding peers - node is connecting and bootstrapping... OK"
+    fi
+  fi
   if [ -d "$NODE_DIR/$__PEER_ID" ]; then
     set_cached_argsline "$__PEER_ID" "$ARGSLINE"
     set_cached_pid "$__PEER_ID" "$__PID"
@@ -869,15 +993,10 @@ snnm_restart_singleport(){
      fi
      __PEER_ID=$(get_peernodedir_from_peernodedirpath "$__PATH")
      if [ -z "$__PEER_ID" ]; then
-       echo "FATAL: For port $__PORT failed to extract PEER_ID from path $__PATH."
+       #echo "FATAL: For port $__PORT failed to extract PEER_ID from path $__PATH."
        echo "----------------------------------------------------------------------"
-       echo "TRY START REPLACEMENT USING SOMETHING LIKE: ./snnm -p $__PORT -w 0 -s"
-       snnm_start_fast "$__PORT" "$__PORT" #-s
-       #echo "./snnm -p $__PORT -w 10 -s" >> "./RECOVERYCOMMANDS"
-       #(./snnm -p "$__PORT" -w 0 -s )
-       #echo
+       snnm_start_fast "$__PORT" "$__PORT"
        return
-       #exit 1
      fi
      local __PID
      __PID=$(get_cached_pid "$__PEER_ID")
@@ -968,15 +1087,17 @@ snnm_terminate_and_restart_stuck_nodes() {            # -X option, unlike -x, no
           _CPULINES=$(cat "$SNNM_BYPORT_DIR/$_PORT/logs/safenode.log" | tail -30 | grep "physical_cpu_threads" | wc -l )
           local _RECORDLINES
           _RECORDLINES=$(grep "Wrote record" "$SNNM_BYPORT_DIR/$_PORT/logs/safenode.log" | wc -l )
+          local _SPENDLINES
+          _SPENDLINES=$(grep "Successfully verified SignedSpend" "$SNNM_BYPORT_DIR/$_PORT/logs/safenode.log" | wc -l )
           local _REPORTLINES
           _REPORTLINES=$(cat "$SNNM_BYPORT_DIR/$_PORT/logs/safenode.log" | tail -1000 | grep "is reported as having issue" | wc -l)
           if [[ "$_BADLINES" -ge "1" ]] || [[ "$LINES" -ge "1000" ]] && [[ "$_CPULINES" -ge "20" ]]; then
-            echo "Node at port $_PORT seems STALE - SHOULD BE DESTROYED (CPUlines $_CPULINES; BADlines $_BADLINES/$_TOTAL_BADLINES, REPORTlines $_REPORTLINES, WROTElines $_RECORDLINES of $_LINES)"
+            echo "Node at port $_PORT seems STALE - SHOULD BE DESTROYED (CPUlines $_CPULINES; BADlines $_BADLINES/$_TOTAL_BADLINES, SPENDlines $_SPENDLINES, REPORTlines $_REPORTLINES, WROTElines $_RECORDLINES of $_LINES)"
             echo "TRY START REPLACEMENT USING SOMETHING LIKE: ./snnm -p $__PORT -D -X"
             #eval "$HOME/snnm -p $__PORT -D -X"
             exit 1
           else
-            echo "Node at port $_PORT seems okay. (CPUlines $_CPULINES; BADlines $_BADLINES/$_TOTAL_BADLINES, REPORTlines $_REPORTLINES, WROTElines $_RECORDLINES of $_LINES)"
+            echo "Node at port $_PORT seems okay. (CPUlines $_CPULINES; BADlines $_BADLINES/$_TOTAL_BADLINES, SPENDlines $_SPENDLINES, REPORTlines $_REPORTLINES, WROTElines $_RECORDLINES of $_LINES)"
           fi
         fi
       else
@@ -1116,7 +1237,7 @@ cmdline() {
   local __ITEMS
   __ITEMS=$(ls -1 "$NODE_DIR/" | wc -l )
   echo "Node directory contains $__ITEMS nodes."
-  while getopts "DCou:sLecjvqKkw:d:hn:M:m:a:b:iltrxXp:z" OPTION   # Process options
+  while getopts "ADCou:sLecjvqKkw:d:hn:M:m:a:b:iltrxXp:z" OPTION   # Process options
   do
     case $OPTION in
       h) usage;
@@ -1150,6 +1271,7 @@ cmdline() {
          [ -z "$WAIT_SECS" ] && echo "FATAL: -w option missing value" && exit 1
          ;;
       n) STRACE_SECS=${OPTARG} ;;
+      A) BOOTSTRAPPEER="" ;;
       i) INTERACTIVE="y" ;;
       e) RPC_ENABLE="y" ;;
       z) REUSE_LATEST_PSCACHE="y" ;;
@@ -1199,6 +1321,7 @@ OPTIONS:
    -w <seconds> wait time in seconds between launch of new nodes
 
 EXPERT OPTIONS:
+   -A do not use any hardcoded peers for bootstrapping
    -m <condition> condition for -t operation to proceed: Only if forwarded nanos less provided value
    -M <condition> condition for -X operation to proceed: Only if connection counts is less or equal provided value
    -D allow destruction/archiving of nodes that are terminated during -X operation
@@ -1285,8 +1408,7 @@ environment_check() {
   #enable functionality based on command availability
   command_exists "grpcurl" && command_exists "jq" && RPC_SUPPORT_CHECK_RESULT="y"
   [ -n "$RPC_SHOW" ] && [ -z "$RPC_SUPPORT_CHECK_RESULT" ] && echo "FATAL: RPC calls not enabled. Ensure grpcurl and jq are both installed." && exit 1
-  [ "$OWNER_DISCORD_ID" != "none" ] && echo "OWNER_DISCORD_ID is set to $OWNER_DISCORD_ID in the snnm script. To unset it, change it to none."
-  [ -n "$BOOTSTRAPPEER" ] && echo "BOOTSTRAP PEER is set to $BOOTSTRAPPEER in the snnm script."
+  [ "$OWNER_DISCORD_ID" != "none" ] && echo "OWNER_DISCORD_ID is set to $OWNER_DISCORD_ID at top of snnm script. To unset it, change it to none."
 }
 
 main() {
