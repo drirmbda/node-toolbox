@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #global variables readonly
-readonly VERSION="0.7.2"
+readonly VERSION="0.7.3"
 readonly ARGS=( "$@" )
 OWNER_DISCORD_ID="none"                   # Disabled if "none". Set to your own ID as default (sorry if your ID is none)
 UPNP="Y"                                   # default networking setup, set to "Y" or non-empty to apply --upnp
@@ -1238,7 +1238,7 @@ cmdline() {
   local __ITEMS
   __ITEMS=$(ls -1 "$NODE_DIR/" | wc -l )
   echo "Node directory contains $__ITEMS nodes."
-  while getopts "ADCou:sLecjvqKkw:d:hn:M:m:a:b:iltrxXp:z" OPTION   # Process options
+  while getopts "ABDCou:sLecjvqKkw:d:hn:M:m:a:b:iltrxXp:z" OPTION   # Process options
   do
     case $OPTION in
       h) usage;
@@ -1273,6 +1273,7 @@ cmdline() {
          ;;
       n) STRACE_SECS=${OPTARG} ;;
       A) BOOTSTRAPPEER="" ;;
+      B) FORCECACHEDBOOTSTRAPLIST="Y" ;;
       i) INTERACTIVE="y" ;;
       e) RPC_ENABLE="y" ;;
       z) REUSE_LATEST_PSCACHE="y" ;;
