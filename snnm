@@ -931,7 +931,8 @@ snnm_terminate_singleport(){
     if [ -n "$MATCHCONDITION" ]; then
       if [ -n "$__PEER_ID" ]; then
         __FORWARDED_NANOS=$(get_forwarded_nanos "$__PEER_ID")
-        [ "$__FORWARDED_NANOS" -le "$MATCHCONDITION" ] && __PREVENT_OPERATION="" #clear block to proceed
+        [ -z "$__FORWARDED_NANOS" ] && __PREVENT_OPERATION="" #clear block to proceed
+        [ -n "$__FORWARDED_NANOS" ] && [ "$__FORWARDED_NANOS" -le "$MATCHCONDITION" ] && __PREVENT_OPERATION="" #clear block to proceed
       fi
     fi
     if [ -z "$__PREVENT_OPERATION" ]; then
